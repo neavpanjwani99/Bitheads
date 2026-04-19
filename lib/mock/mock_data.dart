@@ -1,94 +1,91 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'dart:collection';
-import '../models/bed_model.dart';
 import '../models/alert_model.dart';
 import '../models/staff_model.dart';
 import '../models/patient_model.dart';
-import '../core/dsa/alert_priority_queue.dart';
+import '../models/bed_model.dart';
+
 import '../core/dsa/patient_queue.dart';
-import '../core/dsa/staff_graph.dart';
-import '../core/dsa/action_stack.dart';
-import '../core/dsa/occupancy_trend.dart';
-import '../core/dsa/staff_sorter.dart';
-import '../core/dsa/bed_search.dart';
+import '../core/dsa/alert_priority_queue.dart';
 
-// --- DSA INSTANCES ---
-final globalAlertQueue = AlertPriorityQueue();
-final globalPatientQueue = PatientQueue();
-final globalStaffGraph = StaffGraph();
-final globalActionStack = ActionStack();
-final globalOccupancyTrend = OccupancyTrend(windowSizeMinutes: 10);
-
-// Provide generic entry access securely
-final actionStackProvider = Provider((ref) => globalActionStack);
-final patientQueueProvider = Provider((ref) => globalPatientQueue);
-final staffGraphProvider = Provider((ref) => globalStaffGraph);
-
-// --- BED PROVIDER ---
-class BedNotifier extends Notifier<List<BedModel>> {
+// Current active user
+class CurrentUserNotifier extends Notifier<StaffModel?> {
   @override
-  List<BedModel> build() {
-    List<BedModel> initialBeds = [
-      for (int i = 1; i <= 5; i++) BedModel(id: 'ICU-$i', type: 'ICU', status: i <= 2 ? 'Occupied' : 'Available'),
-      for (int i = 1; i <= 10; i++) BedModel(id: 'GEN-${i.toString().padLeft(2, '0')}', type: 'General', status: i < 3 ? 'Reserved' : (i < 8 ? 'Occupied' : 'Available')),
-      for (int i = 1; i <= 5; i++) BedModel(id: 'EMR-$i', type: 'Emergency', status: i <= 3 ? 'Occupied' : 'Available'),
-    ];
-    // Must be sorted for Binary Search constraint
-    initialBeds.sort((a, b) => a.id.compareTo(b.id)); 
-    return initialBeds;
+  StaffModel? build() => null;
+  void setUser(StaffModel user) => state = user;
+}
+final currentUserProvider = NotifierProvider<CurrentUserNotifier, StaffModel?>(CurrentUserNotifier.new);
+
+// PATIENTS
+class PatientsNotifier extends Notifier<List<PatientModel>> {
+  @override
+  List<PatientModel> build() => [
+    PatientModel(id: 'P-001', name: 'Ravi M.', age: 45, gender: 'M', triageLevel: 'CRITICAL', vitalsSummary: 'BP: 80/50, HR: 135', assignedBedId: 'ICU-1', lastVitalsTime: DateTime.now().subtract(const Duration(minutes: 14)), vitalStatus: 'critical'),
+    PatientModel(id: 'P-002', name: 'Meera S.', age: 62, gender: 'F', triageLevel: 'URGENT', vitalsSummary: 'BP: 150/90, HR: 102', assignedBedId: 'EMR-2', lastVitalsTime: DateTime.now().subtract(const Duration(minutes: 32)), vitalStatus: 'warning'),
+    PatientModel(id: 'P-003', name: 'Aarav J.', age: 28, gender: 'M', triageLevel: 'STABLE', vitalsSummary: 'BP: 120/80, HR: 72', assignedBedId: 'GEN-4', lastVitalsTime: DateTime.now().subtract(const Duration(minutes: 120)), vitalStatus: 'normal'),
+  ];
+  
+  void addPatient(PatientModel p) {
+    state = [...state, p];
   }
 
-  void updateBedStatus(String id, String status) {
-    BedModel? target = BedSearch.binarySearch(state, id);
-    if (target != null) {
-      String oldStatus = target.status;
-      state = [
-        for (final bed in state)
-          if (bed.id == id) bed.copyWith(status: status) else bed
-      ];
-      
-      // Update Occpancy Trend roughly
-      int occ = state.where((b) => b.status == 'Occupied').length;
-      double per = (occ / state.length) * 100;
-      globalOccupancyTrend.addDataPoint(per);
-
-      // Track Undo History
-      globalActionStack.push(AdminAction(
-        description: 'Changed bed $id to $status',
-        timestamp: DateTime.now(),
-        undoCallback: () => _forceUpdateBedStatus(id, oldStatus)
-      ));
-    }
+  void updatePatient(PatientModel updated) {
+    state = [for (final p in state) p.id == updated.id ? updated : p];
   }
 
-  void _forceUpdateBedStatus(String id, String status) {
-    state = [
-      for (final bed in state)
-        if (bed.id == id) bed.copyWith(status: status) else bed
-    ];
+  void removePatient(String id) {
+    state = state.where((p) => p.id != id).toList();
   }
 }
-final bedsProvider = NotifierProvider<BedNotifier, List<BedModel>>(BedNotifier.new);
+final patientsProvider = NotifierProvider<PatientsNotifier, List<PatientModel>>(PatientsNotifier.new);
 
+// INCOMING PATIENTS
+final globalPatientQueue = PatientQueue();
+class IncomingPatientNotifier extends Notifier<List<PatientModel>> {
+  @override
+  List<PatientModel> build() {
+    globalPatientQueue.enqueue(PatientModel(id: 'INC-1', name: 'Unknown Male', age: 35, gender: 'M', triageLevel: 'UNASSIGNED', vitalsSummary: 'Accident Trauma'));
+    return globalPatientQueue.toList();
+  }
 
-// --- ALERT PROVIDER ---
+  void addIncoming(PatientModel p) {
+    globalPatientQueue.enqueue(p);
+    state = globalPatientQueue.toList();
+  }
+
+  void startTriageAndRemove() {
+    globalPatientQueue.dequeue();
+    state = globalPatientQueue.toList();
+  }
+}
+final incomingPatientProvider = NotifierProvider<IncomingPatientNotifier, List<PatientModel>>(IncomingPatientNotifier.new);
+
+// BEDS
+class BedsNotifier extends Notifier<List<BedModel>> {
+  @override
+  List<BedModel> build() {
+    List<BedModel> initialBeds = [];
+    for(int i=1; i<=10; i++) initialBeds.add(BedModel(id: 'ICU-$i', type: 'ICU', status: i<=3 ? 'Occupied' : 'Available'));
+    for(int i=1; i<=20; i++) initialBeds.add(BedModel(id: 'GEN-$i', type: 'General', status: i<=12 ? 'Occupied' : (i==13 ? 'Reserved' : 'Available')));
+    for(int i=1; i<=15; i++) initialBeds.add(BedModel(id: 'EMR-$i', type: 'Emergency', status: i<=5 ? 'Occupied' : 'Available'));
+    return initialBeds;
+  }
+  
+  void updateBedStatus(String bedId, String newStatus) {
+    state = [for (final b in state) b.id == bedId ? BedModel(id: b.id, type: b.type, status: newStatus) : b];
+  }
+}
+final bedsProvider = NotifierProvider<BedsNotifier, List<BedModel>>(BedsNotifier.new);
+
+// ALERTS
+final globalAlertQueue = AlertPriorityQueue();
 class AlertNotifier extends Notifier<List<AlertModel>> {
   @override
   List<AlertModel> build() {
-    globalAlertQueue.clear();
-    globalAlertQueue.insert(AlertModel(
-      id: 'A1', type: 'Mass Casualty', severity: 'CRITICAL', target: 'All Staff',
-      message: 'Highway pileup incoming.', createdAt: DateTime.now().subtract(const Duration(minutes: 5)), status: 'Active',
-    ));
-    globalAlertQueue.insert(AlertModel(
-      id: 'A2', type: 'Equipment Failure', severity: 'STABLE', target: 'Nurses Only',
-      message: 'Ventilator offline.', createdAt: DateTime.now().subtract(const Duration(hours: 1)), status: 'Active',
-    ));
-    globalAlertQueue.insert(AlertModel(
-      id: 'A3', type: 'Patient Code Red', severity: 'URGENT', target: 'Doctors Only',
-      message: 'ICU-3 coding.', createdAt: DateTime.now().subtract(const Duration(minutes: 10)), status: 'Acknowledged', assignedTo: 'D1'
-    ));
-
+    final alert1 = AlertModel(id: 'A1', type: 'Mass Casualty', severity: 'CRITICAL', target: 'All Staff', message: 'Highway pileup, expecting 20+ casualties. All hands on deck.', createdAt: DateTime.now().subtract(const Duration(minutes: 5)), status: 'Active');
+    final alert2 = AlertModel(id: 'A2', type: 'Drug Shortage', severity: 'URGENT', target: 'Pharmacy & Doctors', message: 'Epinephrine stocks critically low below threshold.', createdAt: DateTime.now().subtract(const Duration(minutes: 12)), status: 'Active');
+    
+    globalAlertQueue.insert(alert1);
+    globalAlertQueue.insert(alert2);
     return globalAlertQueue.toList();
   }
 
@@ -96,36 +93,34 @@ class AlertNotifier extends Notifier<List<AlertModel>> {
     globalAlertQueue.insert(alert);
     state = globalAlertQueue.toList();
   }
-
-  void updateAlertStatus(String id, String status, {String? assignedTo}) {
-    List<AlertModel> current = globalAlertQueue.toList();
-    AlertModel? updatedAlert;
-    
-    for (var a in current) {
-      if (a.id == id) updatedAlert = a.copyWith(status: status, assignedTo: assignedTo ?? a.assignedTo);
-    }
-
-    if (updatedAlert != null) {
-      globalAlertQueue.removeById(id);
-      globalAlertQueue.insert(updatedAlert);
-      state = globalAlertQueue.toList();
-    }
-  }
-  void addCodeBlue(StaffModel initiator) {
-    final alert = AlertModel(
-      id: 'CB-${DateTime.now().millisecondsSinceEpoch}',
-      type: 'CODE BLUE',
-      severity: 'CRITICAL',
-      target: 'All Staff',
-      message: 'Code Blue triggered by ${initiator.name} in Ward',
-      createdAt: DateTime.now(),
-      status: 'Active'
-    );
-    globalAlertQueue.insert(alert);
+  
+  void updateStatus(String id, String newStatus) {
+    // In a real heap you'd update/re-heapify, but since we recreate list from internal list:
+    final current = globalAlertQueue.toList();
+    final updated = current.map((a) => a.id == id ? AlertModel(id: a.id, type:a.type, severity:a.severity, target:a.target, message:a.message, createdAt:a.createdAt, status:newStatus) : a).toList();
+    globalAlertQueue.clear();
+    for (var u in updated) globalAlertQueue.insert(u);
     state = globalAlertQueue.toList();
   }
 }
 final alertsProvider = NotifierProvider<AlertNotifier, List<AlertModel>>(AlertNotifier.new);
+
+// STAFF PROVIDER
+class StaffNotifier extends Notifier<List<StaffModel>> {
+  @override
+  List<StaffModel> build() => [
+    StaffModel(uid: 'S01', email: 'admin@cityhospital.com', name: 'Priya Desai', role: 'Admin', specialization: 'Operations'),
+    StaffModel(uid: 'S02', email: 'arjun@cityhospital.com', name: 'Dr. Arjun Mehta', role: 'Doctor', specialization: 'Emergency Med', averageResponseTimeSecs: 90, patientCount: 4),
+    StaffModel(uid: 'S03', email: 'priya@cityhospital.com', name: 'Nurse Priya Sharma', role: 'Nurse', specialization: 'Trauma ICU', averageResponseTimeSecs: 45, patientCount: 2),
+    StaffModel(uid: 'S04', email: 'vikram@cityhospital.com', name: 'Dr. Vikram Singh', role: 'Doctor', specialization: 'Cardiology', available: false),
+    StaffModel(uid: 'S05', email: 'neha@cityhospital.com', name: 'Nurse Neha Patel', role: 'Nurse', specialization: 'General Ward'),
+  ];
+
+  void toggleAvailability(String uid, bool isAv) {
+    state = [for (final s in state) s.uid == uid ? s.copyWith(available: isAv) : s];
+  }
+}
+final staffProvider = NotifierProvider<StaffNotifier, List<StaffModel>>(StaffNotifier.new);
 
 // Mass Casualty Mode Provider
 class MassCasualtyNotifier extends Notifier<bool> {
@@ -134,88 +129,3 @@ class MassCasualtyNotifier extends Notifier<bool> {
   void toggle() => state = !state;
 }
 final massCasualtyProvider = NotifierProvider<MassCasualtyNotifier, bool>(MassCasualtyNotifier.new);
-
-
-// --- STAFF PROVIDER ---
-class StaffNotifier extends Notifier<List<StaffModel>> {
-  // Hash map for lookup
-  final HashMap<String, StaffModel> _staffMap = HashMap<String, StaffModel>();
-
-  @override
-  List<StaffModel> build() {
-    List<StaffModel> initial = [
-      StaffModel(uid: 'A1', name: 'Admin Sarah', role: 'Admin', specialization: 'Head', available: true),
-      StaffModel(uid: 'D1', name: 'Dr. Smith', role: 'Doctor', specialization: 'Cardiology', available: true),
-      StaffModel(uid: 'D2', name: 'Dr. Jones', role: 'Doctor', specialization: 'Neurology', available: false, averageResponseTimeSecs: 300),
-      StaffModel(uid: 'D3', name: 'Dr. Lee', role: 'Doctor', specialization: 'Trauma', available: true, averageResponseTimeSecs: 90),
-      StaffModel(uid: 'D4', name: 'Dr. House', role: 'Doctor', specialization: 'Diagnostics', available: true),
-      StaffModel(uid: 'N1', name: 'Nurse Joy', role: 'Nurse', specialization: 'ICU', available: true),
-      StaffModel(uid: 'N2', name: 'Nurse Oly', role: 'Nurse', specialization: 'Emergency', available: true, patientCount: 2),
-    ];
-    
-    for (var s in initial) {
-      _staffMap[s.uid] = s;
-      globalStaffGraph.addStaffNode(s);
-    }
-    
-    // Test bindings for graph
-    globalStaffGraph.assignPatientToStaff('D1', 'P1');
-    globalStaffGraph.assignPatientToStaff('N1', 'P2');
-
-    return _syncState();
-  }
-
-  List<StaffModel> _syncState() {
-    List<StaffModel> list = _staffMap.values.toList();
-    StaffSorter.mergeSort(list);
-    return list;
-  }
-
-  void toggleAvailability(String uid, bool isAvailable) {
-    if (_staffMap.containsKey(uid)) {
-      _staffMap[uid] = _staffMap[uid]!.copyWith(available: isAvailable);
-      state = _syncState();
-    }
-  }
-}
-final staffProvider = NotifierProvider<StaffNotifier, List<StaffModel>>(StaffNotifier.new);
-
-class CurrentUserNotifier extends Notifier<StaffModel?> {
-  @override
-  StaffModel? build() => null;
-  void setUser(StaffModel user) => state = user;
-}
-final currentUserProvider = NotifierProvider<CurrentUserNotifier, StaffModel?>(CurrentUserNotifier.new);
-
-
-// --- PATIENT PROVIDER ---
-class PatientNotifier extends Notifier<List<PatientModel>> {
-  @override
-  List<PatientModel> build() {
-    state = [
-      PatientModel(id: 'P1', name: 'John Doe', age: 45, gender: 'M', triageLevel: 'CRITICAL', vitalsSummary: 'BP 90/60, HR 120', assignedBedId: 'ICU-1', assignedStaffId: 'D1'),
-      PatientModel(id: 'P2', name: 'Jane Roe', age: 32, gender: 'F', triageLevel: 'URGENT', vitalsSummary: 'BP 110/70, HR 100', assignedBedId: 'EMR-1', assignedStaffId: 'N1'),
-    ];
-    
-    // Add incoming un-triaged to Queue
-    globalPatientQueue.enqueue(PatientModel(id: 'PQ1', name: 'Incoming Trauma', age: 25, gender: 'M', triageLevel: 'UNASSIGNED', vitalsSummary: 'Unknown'));
-    globalPatientQueue.enqueue(PatientModel(id: 'PQ2', name: 'Unknown ER', age: 50, gender: 'F', triageLevel: 'UNASSIGNED', vitalsSummary: 'Unknown'));
-    
-    return state;
-  }
-
-  void updateTriageLevel(String id, String level) {
-    state = [
-      for (final patient in state)
-        if (patient.id == id) patient.copyWith(triageLevel: level) else patient
-    ];
-  }
-}
-final patientsProvider = NotifierProvider<PatientNotifier, List<PatientModel>>(PatientNotifier.new);
-
-// Utility Provider to trigger rebuilt of Queue items
-final incomingPatientProvider = Provider<List<PatientModel>>((ref) {
-  // Note: we'd realistically attach a stream/ticker if dynamic, 
-  // currently we provide list to UI safely without causing constant rebuilds
-  return globalPatientQueue.toList();
-});

@@ -62,7 +62,11 @@ final router = GoRouter(
       path: '/triage_result/:level',
       builder: (context, state) {
         final level = state.pathParameters['level']!;
-        return TriageResultScreen(triageLevel: level);
+        final name = state.uri.queryParameters['name'];
+        final age = int.tryParse(state.uri.queryParameters['age'] ?? '');
+        final gender = state.uri.queryParameters['gender'];
+        
+        return TriageResultScreen(triageLevel: level, name: name, age: age, gender: gender);
       },
     ),
     GoRoute(

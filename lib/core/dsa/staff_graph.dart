@@ -29,7 +29,7 @@ class StaffGraph {
   /// Enforces constraint: One patient cannot have >1 assigned primary staff.
   bool assignPatientToStaff(String staffUid, String patientId) {
     if (!_adjacencyList.containsKey(staffUid)) {
-      addStaffNode(StaffModel(uid: staffUid, name: 'temp', role: 'temp', specialization: 'temp', available: true));
+      addStaffNode(StaffModel(uid: staffUid, name: 'temp', email: 'temp@temp.com', role: 'temp', specialization: 'temp', available: true));
     }
 
     // Constraint Check: Is patient already assigned to someone else?

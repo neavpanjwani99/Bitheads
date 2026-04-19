@@ -2,16 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/data/latest.dart' as tz;
-import 'package:timezone/timezone.dart' as tz;
 
 import '../../app/theme.dart';
 import '../../mock/mock_data.dart';
-import '../../models/patient_model.dart';
-import '../alerts/widgets/alert_card.dart';
-
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+import '../../mock/concerns_provider.dart';
+import '../../mock/announcements_provider.dart';
+import '../../widgets/chatbot_overlay.dart';
 
 class NurseDashboardScreen extends ConsumerStatefulWidget {
   const NurseDashboardScreen({super.key});
@@ -21,205 +17,211 @@ class NurseDashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+  late TabController _logTabController;
+  int _currentIndex = 0;
   
   // Mock Medication List
   final List<Map<String, dynamic>> upcomingMeds = [
-    {'patient': 'Ravi M.', 'med': 'Paracetamol 500mg', 'time': DateTime.now().add(const Duration(minutes: -5)), 'given': false}, // Overdue
+    {'patient': 'Ravi M.', 'med': 'Paracetamol 500mg', 'time': DateTime.now().add(const Duration(minutes: -5)), 'given': false},
     {'patient': 'Meera S.', 'med': 'Insulin', 'time': DateTime.now().add(const Duration(minutes: 45)), 'given': false},
   ];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _initNotifications();
-  }
-  
-  Future<void> _initNotifications() async {
-    try {
-      tz.initializeTimeZones();
-      // await flutterLocalNotificationsPlugin.initialize(initializationSettings: initializationSettings);
-    } catch (e) {
-      // Ignore web initialization crash for demo
-    }
+    _logTabController = TabController(length: 2, vsync: this);
   }
 
   void _markMedGiven(int index) {
-    // flutterLocalNotificationsPlugin.cancel(id: index);
     setState(() {
       upcomingMeds[index]['given'] = true;
     });
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Medication Marked Given')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Medication completed.')));
   }
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('Nursing Operations'),
+        actions: [IconButton(icon: const Icon(Icons.logout_outlined), onPressed: () => context.go('/login'))],
+      ),
+      floatingActionButton: const ChatbotOverlay(),
+      body: _currentIndex == 0 ? _buildDashboardBody() : const Center(child: Text('Bed Tracker Module Placeholder')),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (idx) {
+          if (idx == 1) {
+            context.push('/beds'); // External route for full Bed Tracker 
+          } else {
+            setState(() => _currentIndex = idx);
+          }
+        },
+        selectedItemColor: AppTheme.primary,
+        unselectedItemColor: AppTheme.textSecondary,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
+          BottomNavigationBarItem(icon: Icon(Icons.bed_outlined), label: 'Beds'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDashboardBody() {
     final currentUser = ref.watch(currentUserProvider);
-    if (currentUser == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (currentUser == null) return const Center(child: CircularProgressIndicator());
 
     final updatedStaff = ref.watch(staffProvider).firstWhere((s) => s.uid == currentUser.uid, orElse: () => currentUser);
-    final alerts = ref.watch(alertsProvider).where((a) => a.target == 'All Staff' || a.target == 'Nurses Only').toList();
-    final patients = ref.watch(patientsProvider).where((p) => p.assignedStaffId == currentUser.uid).toList();
+    final allConcerns = ref.watch(concernsProvider).where((c) => c.status == 'Pending').toList();
+    final announcements = ref.watch(announcementsProvider).where((a) => a.isActive).toList();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF0F4FF),
-      appBar: AppBar(
-        title: const Text('Nurse Operations', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          IconButton(icon: const Icon(Icons.logout, color: AppTheme.textPrimary), onPressed: () => context.go('/login')),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // HEADER
-            Text('Good morning,\n${updatedStaff.name.replaceAll('Nurse ', '')} 👋', style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 28, color: const Color(0xFF1C1C2E))),
-            const Gap(8),
-            Text('Senior Nurse — Ward B, Floor 2', style: const TextStyle(color: Color(0xFF5F6368), fontSize: 16)),
-            const Gap(12),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildChip('🏥 Ward B'), const Gap(8),
-                  _buildChip('👶 Pediatric'), const Gap(8),
-                  _buildChip('🔴 ICU Support'),
-                ],
-              ),
-            ),
-            const Gap(16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.divider)),
-              child: Row(
-                children: [
-                  const Icon(Icons.watch_later_outlined, size: 16, color: AppTheme.primary),
-                  const Gap(8),
-                  const Text('Shift: 08:00 — 20:00', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  const Text('Attending: Ravi M., +2', style: TextStyle(color: Color(0xFF5F6368))),
-                ],
-              ),
-            ),
-            const Gap(24),
-            
-            // CODE BLUE
-            SizedBox(
-              height: 60,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.critical, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: () {
-                  ref.read(alertsProvider.notifier).addCodeBlue(updatedStaff);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('CODE BLUE SENT ✓'), backgroundColor: AppTheme.critical, duration: Duration(seconds: 3)));
-                },
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.warning, color: Colors.white, size: 28), Gap(12),
-                    Text('🚨 CODE BLUE', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1)),
-                  ],
-                ),
-              ),
-            ),
-            const Gap(24),
-            
-            // AVAILABILITY TOGGLE
-            GestureDetector(
-              onTap: () => ref.read(staffProvider.notifier).toggleAvailability(updatedStaff.uid, !updatedStaff.available),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                decoration: BoxDecoration(color: updatedStaff.available ? AppTheme.stable : Colors.grey.shade400, borderRadius: BorderRadius.circular(16)),
-                child: Column(
-                  children: [
-                    Icon(updatedStaff.available ? Icons.check_circle : Icons.do_not_disturb, size: 40, color: Colors.white),
-                    const Gap(8),
-                    Text(updatedStaff.available ? 'Available for Assignment' : 'Offline / Busy', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-            ),
-            const Gap(32),
-
-            // MEDICATION TRACKER
-            const Text('Medication Schedule', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1C1C2E))),
-            const Gap(16),
-            ...upcomingMeds.asMap().entries.where((e) => !e.value['given']).map((e) {
-              DateTime time = e.value['time'];
-              bool overdue = time.isBefore(DateTime.now());
-              return Card(
-                color: Colors.white, margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: ListTile(
-                  leading: const Icon(Icons.medication, color: AppTheme.primary),
-                  title: Text('${e.value['patient']} — ${e.value['med']}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(overdue ? 'OVERDUE' : 'Scheduled: ${time.hour}:${time.minute.toString().padLeft(2, '0')}', 
-                    style: TextStyle(color: overdue ? AppTheme.critical : Colors.black54, fontWeight: overdue ? FontWeight.bold : FontWeight.normal)),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.check_circle_outline, color: AppTheme.stable),
-                    onPressed: () => _markMedGiven(e.key),
-                  ),
-                ),
-              );
-            }),
-            if (upcomingMeds.where((m) => !m['given']).isEmpty)
-              const Text('No upcoming medications.', style: TextStyle(color: Color(0xFF5F6368))),
-            
-            const Gap(32),
-            const Text('Operations Log', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1C1C2E))),
-            const Gap(16),
-            Container(
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
-              child: Column(
-                children: [
-                  TabBar(
-                    controller: _tabController,
-                    labelColor: AppTheme.primary,
-                    unselectedLabelColor: const Color(0xFF5F6368),
-                    indicatorColor: AppTheme.primary,
-                    tabs: const [Tab(text: 'Patients'), Tab(text: 'Shifts'), Tab(text: 'Tasks')],
-                  ),
-                  SizedBox(
-                    height: 300,
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildPatientHistory(),
-                        _buildShiftHistory(),
-                        _buildTaskHistory(),
-                      ],
-                    ),
-                  )
-                ],
-              ),
-            ),
-            
-            const Gap(120),
-          ],
-        ),
-      ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          FloatingActionButton.extended(
-            heroTag: 'handoffBtn',
-            backgroundColor: AppTheme.urgent,
-            onPressed: () => _startHandoff(context),
-            icon: const Icon(Icons.note_alt, color: Colors.white),
-            label: const Text('Start Handoff', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          // Header
+          Row(
+            children: [
+              CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.replaceAll('Nurse ', '').substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
+              const Gap(16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(updatedStaff.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                    Text('${updatedStaff.hospitalId} • Ward B, Fl 2', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                  ],
+                ),
+              ),
+              _buildAvailToggle(updatedStaff.available, () => ref.read(staffProvider.notifier).toggleAvailability(updatedStaff.uid, !updatedStaff.available)),
+            ],
           ),
           const Gap(16),
-          FloatingActionButton.extended(
-            heroTag: 'bedsBtn',
-            backgroundColor: AppTheme.primary,
-            onPressed: () => _showBedStatusSheet(context),
-            icon: const Icon(Icons.bed, color: Colors.white),
-            label: const Text('Manage Beds', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildChip('Ward B'), const Gap(8),
+                _buildChip('Pediatric'), const Gap(8),
+                _buildChip('ICU Support'),
+              ],
+            ),
           ),
+          const Gap(32),
+
+          if (announcements.isNotEmpty) ...[
+            ...announcements.map((a) => _buildAnnouncementBanner(a)),
+            const Gap(16),
+          ],
+
+          // CONCERNS SECTION
+          if (allConcerns.isNotEmpty) ...[
+            const Text('Help Requests', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            const Gap(16),
+            ...allConcerns.map((c) => Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: c.priority == 'Urgent' ? AppTheme.urgent : AppTheme.divider)),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${c.doctorName} • ${c.patientName}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                        if (c.priority == 'Urgent')
+                          Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: AppTheme.urgent, borderRadius: BorderRadius.circular(12)), child: const Text('URGENT', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                    const Gap(8),
+                    Text(c.type, style: const TextStyle(fontWeight: FontWeight.w500, color: AppTheme.primaryDark)),
+                    Text(c.description, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                    const Gap(16),
+                    Row(
+                      children: [
+                        Expanded(child: OutlinedButton(onPressed: (){ ref.read(concernsProvider.notifier).updateStatus(c.id, 'Declined'); }, child: const Text('Decline', style: TextStyle(color: AppTheme.textSecondary)))),
+                        const Gap(12),
+                        Expanded(child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: AppTheme.stable), onPressed: (){ ref.read(concernsProvider.notifier).updateStatus(c.id, 'Accepted'); }, child: const Text('Accept'))),
+                      ],
+                    )
+                  ],
+                ),
+              ),
+            )),
+            const Gap(32),
+          ],
+
+          // MEDICATION TRACKER
+          const Text('Medication Schedule', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+          const Gap(16),
+          ...upcomingMeds.asMap().entries.where((e) => !e.value['given']).map((e) {
+            DateTime time = e.value['time'];
+            bool overdue = time.isBefore(DateTime.now());
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8), 
+              child: ListTile(
+                leading: const Icon(Icons.vaccines_outlined, color: AppTheme.primary),
+                title: Text('${e.value['patient']} — ${e.value['med']}', style: const TextStyle(fontWeight: FontWeight.w500)),
+                subtitle: Text(overdue ? 'OVERDUE' : 'Scheduled: ${time.hour}:${time.minute.toString().padLeft(2, '0')}', 
+                  style: TextStyle(color: overdue ? AppTheme.critical : AppTheme.textSecondary, fontWeight: overdue ? FontWeight.bold : FontWeight.normal)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.check_circle_outline, color: AppTheme.stable),
+                  onPressed: () => _markMedGiven(e.key),
+                ),
+              ),
+            );
+          }),
+          if (upcomingMeds.where((m) => !m['given']).isEmpty)
+            const Text('No upcoming medications.', style: TextStyle(color: AppTheme.textSecondary)),
+          
+          const Gap(32),
+          const Text('Operations Log', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+          const Gap(16),
+          Card(
+            child: Column(
+              children: [
+                TabBar(
+                  controller: _logTabController,
+                  labelColor: AppTheme.primary,
+                  unselectedLabelColor: AppTheme.textSecondary,
+                  indicatorColor: AppTheme.primary,
+                  tabs: const [Tab(text: 'Work Shift'), Tab(text: 'System Logins')],
+                ),
+                SizedBox(
+                  height: 250,
+                  child: TabBarView(
+                    controller: _logTabController,
+                    children: [
+                      _buildWorkHistory(),
+                      _buildLoginHistory(),
+                    ],
+                  ),
+                )
+              ],
+            ),
+          ),
+          const Gap(100),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAvailToggle(bool isAvail, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(color: isAvail ? AppTheme.stableLight : AppTheme.divider, borderRadius: BorderRadius.circular(24)),
+        child: Row(
+          children: [
+            Icon(isAvail ? Icons.check_circle_outline : Icons.do_not_disturb_outlined, size: 16, color: isAvail ? AppTheme.stable : AppTheme.textSecondary),
+            const Gap(6),
+            Text(isAvail ? 'On Duty' : 'Busy', style: TextStyle(color: isAvail ? AppTheme.stable : AppTheme.textSecondary, fontWeight: FontWeight.w600, fontSize: 13)),
+          ],
+        ),
       ),
     );
   }
@@ -227,168 +229,81 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
   Widget _buildChip(String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16)),
-      child: Text(label, style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold, fontSize: 13)),
+      decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(16)),
+      child: Text(label, style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.w600, fontSize: 13)),
     );
   }
 
-  Widget _buildPatientHistory() {
+  Widget _buildWorkHistory() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _historyItem('John Doe', 'Discharged', 'Stable • 4 days care'),
-        _historyItem('Ananya P.', 'Transferred', 'Critical • ICU move'),
-        _historyItem('Raj M.', 'Discharged', 'Stable • 2 hours ER'),
-      ],
-    );
-  }
-  
-  Widget _buildShiftHistory() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _historyItem('17 Apr 2026', '⭐ 4.8 Rating', '12 Patients • 2m 1s avg response'),
-        _historyItem('16 Apr 2026', '⭐ 4.9 Rating', '10 Patients • 1m 50s avg response'),
+        _histItem('18 Apr', 'Shift: 08:00-16:00', '12 Patients • 6 Meds', '1 Tasks • 2m response'),
+        _histItem('17 Apr', 'Shift: 08:00-16:00', '10 Patients • 4 Meds', '4 Tasks • 1m50s response'),
+        _histItem('16 Apr', 'Shift: 08:00-16:00', '14 Patients • 8 Meds', '2 Tasks • 1m10s response'),
+        _histItem('15 Apr', 'Shift: 08:00-16:00', '9 Patients • 5 Meds', '3 Tasks • N/A'),
+        _histItem('14 Apr', 'Shift: 08:00-16:00', '12 Patients • 6 Meds', '5 Tasks • 45s response'),
       ],
     );
   }
 
-  Widget _buildTaskHistory() {
+  Widget _buildLoginHistory() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _historyItem('Administered Medication', '14:32', 'Bed ICU-3', isTask: true),
-        _historyItem('Vitals Recorded', '13:15', 'Ravi M.', isTask: true),
-        _historyItem('Alert accepted - URGENT', '12:45', '', isTask: true),
+        _histItem('Today, 07:45', 'Logout: --', 'Duration: Active', 'Device: Mobile (Android)'),
+        _histItem('17 Apr, 07:55', 'Logout: 16:05', 'Duration: 8h 10m', 'Device: Mobile (Android)'),
+        _histItem('16 Apr, 07:50', 'Logout: 16:15', 'Duration: 8h 25m', 'Device: Mobile (Android)'),
+        _histItem('15 Apr, 07:48', 'Logout: 16:00', 'Duration: 8h 12m', 'Device: Mobile (Android)'),
+        _histItem('14 Apr, 07:59', 'Logout: 16:05', 'Duration: 8h 06m', 'Device: Mobile (Android)'),
+        _histItem('13 Apr, 07:44', 'Logout: 16:00', 'Duration: 8h 16m', 'Device: Mobile (Android)'),
+        _histItem('12 Apr, 07:56', 'Logout: 16:20', 'Duration: 8h 24m', 'Device: Kiosk'),
       ],
     );
   }
 
-  Widget _historyItem(String title, String status, String sub, {bool isTask = false}) {
-    return Padding(
+  Widget _histItem(String t1, String t2, String t3, String t4) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.only(bottom: 12),
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.divider))),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(
-              children: [
-                if (isTask) const Icon(Icons.check_circle, size: 14, color: AppTheme.stable),
-                if (isTask) const Gap(6),
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              ],
-            ),
-            Text(sub, style: const TextStyle(color: Color(0xFF5F6368), fontSize: 12)),
+            Text(t1, style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            Text(t2, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
           ]),
-          Text(status, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: status.contains('Discharge') ? AppTheme.stable : AppTheme.textSecondary)),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(t3, style: const TextStyle(fontWeight: FontWeight.w500, color: AppTheme.textPrimary)),
+            Text(t4, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+          ]),
         ],
       ),
     );
   }
 
-  void _showBedStatusSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        builder: (_, controller) {
-          return Container(
-            decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-            padding: const EdgeInsets.all(24),
-            child: SingleChildScrollView(
-              controller: controller,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Update Bed Status', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                  const Gap(8),
-                  const Text('Current: ICU-3', style: TextStyle(color: Color(0xFF5F6368))),
-                  const Gap(24),
-                  
-                  _buildBedOption('Available', 'Ready for patient', Icons.check_circle, const Color(0xFFE8F5E9), AppTheme.stable),
-                  const Gap(12),
-                  _buildBedOption('Occupied', 'Patient assigned', Icons.do_not_disturb_on, const Color(0xFFFFEBEE), AppTheme.critical),
-                  const Gap(12),
-                  _buildBedOption('Reserved', 'Pending assignment', Icons.warning_amber_rounded, const Color(0xFFFFF3E0), AppTheme.urgent),
-                  
-                  const Gap(24),
-                  TextField(
-                    decoration: InputDecoration(
-                      labelText: 'Add Note',
-                      hintText: 'Reason for status change...',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    maxLines: 2,
-                  ),
-                  const Gap(24),
-                  SizedBox(
-                    width: double.infinity, height: 50,
-                    child: ElevatedButton(onPressed: ()=>Navigator.pop(context), child: const Text('Update Scope'))
-                  )
-                ],
-              ),
-            ),
-          );
-        }
-      ),
-    );
-  }
-
-  Widget _buildBedOption(String title, String sub, IconData icon, Color bgColor, Color iconColor) {
-    return InkWell(
-      onTap: (){},
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(12)),
-        child: Row(
-          children: [
-            Icon(icon, color: iconColor, size: 32),
-            const Gap(16),
-            Column(
+  Widget _buildAnnouncementBanner(AnnouncementModel a) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: a.isPriority ? AppTheme.criticalLight : AppTheme.urgentLight, borderRadius: BorderRadius.circular(12), border: Border.all(color: a.isPriority ? AppTheme.critical : AppTheme.urgent)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.campaign_outlined, color: a.isPriority ? AppTheme.critical : AppTheme.urgent),
+          const Gap(12),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: iconColor)),
-                Text(sub, style: TextStyle(fontSize: 13, color: iconColor.withValues(alpha: 0.8))),
+                Text(a.title, style: TextStyle(fontWeight: FontWeight.w600, color: a.isPriority ? AppTheme.critical : AppTheme.urgent)),
+                Text(a.message, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
               ],
             )
-          ],
-        ),
+          )
+        ],
       ),
-    );
-  }
-
-  void _startHandoff(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 16, right: 16, top: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Handoff Notes', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const Gap(16),
-              TextField(maxLines: 4, decoration: const InputDecoration(hintText: 'Notes for next nurse...', border: OutlineInputBorder())),
-              const Gap(16),
-              SizedBox(
-                width: double.infinity, height: 50,
-                child: ElevatedButton(onPressed: (){
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Handoff submitted at 19:32')));
-                }, child: const Text('Submit Handoff'))
-              ),
-              const Gap(24),
-            ],
-          ),
-        );
-      }
     );
   }
 }

@@ -9,6 +9,8 @@ class PatientModel {
   final String? assignedStaffId;
   final DateTime? lastVitalsTime;
   final String vitalStatus;
+  final List<String> notes;
+  final String attendanceStatus; // 'Pending', 'Attended', 'Not_Attended'
 
   PatientModel({
     required this.id,
@@ -21,6 +23,8 @@ class PatientModel {
     this.assignedStaffId,
     this.lastVitalsTime,
     this.vitalStatus = 'normal',
+    this.notes = const [],
+    this.attendanceStatus = 'Pending',
   });
 
   PatientModel copyWith({
@@ -34,6 +38,8 @@ class PatientModel {
     String? assignedStaffId,
     DateTime? lastVitalsTime,
     String? vitalStatus,
+    List<String>? notes,
+    String? attendanceStatus,
   }) {
     return PatientModel(
       id: id ?? this.id,
@@ -46,6 +52,8 @@ class PatientModel {
       assignedStaffId: assignedStaffId ?? this.assignedStaffId,
       lastVitalsTime: lastVitalsTime ?? this.lastVitalsTime,
       vitalStatus: vitalStatus ?? this.vitalStatus,
+      notes: notes ?? this.notes,
+      attendanceStatus: attendanceStatus ?? this.attendanceStatus,
     );
   }
 

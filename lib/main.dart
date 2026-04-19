@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/routes.dart';
 import 'app/theme.dart';
-import 'widgets/chatbot_overlay.dart'; 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   runApp(
     const ProviderScope(
       child: RapidCareApp(),
@@ -22,15 +24,6 @@ class RapidCareApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
-      builder: (context, child) {
-        // Applying the Global Chatbot overlay on top of every route
-        return Stack(
-          children: [
-            child!,
-            const ChatbotOverlay(),
-          ],
-        );
-      },
     );
   }
 }
