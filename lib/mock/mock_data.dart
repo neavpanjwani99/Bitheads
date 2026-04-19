@@ -111,8 +111,29 @@ class AlertNotifier extends Notifier<List<AlertModel>> {
       state = globalAlertQueue.toList();
     }
   }
+  void addCodeBlue(StaffModel initiator) {
+    final alert = AlertModel(
+      id: 'CB-${DateTime.now().millisecondsSinceEpoch}',
+      type: 'CODE BLUE',
+      severity: 'CRITICAL',
+      target: 'All Staff',
+      message: 'Code Blue triggered by ${initiator.name} in Ward',
+      createdAt: DateTime.now(),
+      status: 'Active'
+    );
+    globalAlertQueue.insert(alert);
+    state = globalAlertQueue.toList();
+  }
 }
 final alertsProvider = NotifierProvider<AlertNotifier, List<AlertModel>>(AlertNotifier.new);
+
+// Mass Casualty Mode Provider
+class MassCasualtyNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+  void toggle() => state = !state;
+}
+final massCasualtyProvider = NotifierProvider<MassCasualtyNotifier, bool>(MassCasualtyNotifier.new);
 
 
 // --- STAFF PROVIDER ---
