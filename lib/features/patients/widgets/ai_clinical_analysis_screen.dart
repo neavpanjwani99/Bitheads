@@ -49,10 +49,15 @@ ${widget.patient.orders.isNotEmpty ? widget.patient.orders.join('\n- ') : 'No or
 
       setState(() {
         _rawOutput = result;
-        final parts = result.split('---SECTION---');
-        _sections = parts.map((s) => s.trim()).toList();
-        while (_sections.length < 4) {
-          _sections.add('Information unavailable for this section.');
+        
+        if (result.contains('AI currently unavailable') || result.contains('AI clinical analysis failed')) {
+            _sections = [result, 'Try checking your connection or API keys.', '---', '---'];
+        } else {
+            final parts = result.split('---SECTION---');
+            _sections = parts.map((s) => s.trim()).toList();
+            while (_sections.length < 4) {
+              _sections.add('Information unavailable for this section.');
+            }
         }
         _isLoading = false;
       });
@@ -60,7 +65,7 @@ ${widget.patient.orders.isNotEmpty ? widget.patient.orders.join('\n- ') : 'No or
       if (!mounted) return;
       setState(() {
         _rawOutput = 'Analysis Error: $e';
-        _sections = ['Error','Error','Error','Error'];
+        _sections = ['Failed to generate synthesis.', 'Please try again.', 'Error: $e', '---'];
         _isLoading = false;
       });
     }

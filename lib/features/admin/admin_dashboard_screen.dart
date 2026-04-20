@@ -778,49 +778,72 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       return StatefulBuilder(builder: (ctx, setLocalState) {
         if (_inventoryDraft == null) return const Center(child: CircularProgressIndicator());
         
-        return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom, left: 24, right: 24, top: 24), child: SingleChildScrollView(child: Column(
-          mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Resource Inventory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                IconButton(onPressed: () => Navigator.pop(c), icon: const Icon(Icons.close)),
-              ],
-            ),
-            const Gap(16),
-            const Text('Blood Bank (Units)', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary)),
-            const Gap(8),
-            GridView.count(
-              crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 2.5,
-              children: [
-                _resCard('A+', _inventoryDraft!['B-A'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-A']=v)),
-                _resCard('B+', _inventoryDraft!['B-B'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-B']=v)),
-                _resCard('O+', _inventoryDraft!['B-O'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-O']=v)),
-                _resCard('AB+', _inventoryDraft!['B-AB'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-AB']=v)),
-              ],
-            ),
-            const Gap(24),
-            const Text('Critical Equipment', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary)),
-            const Gap(8),
-            _eqRow('Ventilators', _inventoryDraft!['E-V'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-V']=v)),
-            _eqRow('Defibrillators', _inventoryDraft!['E-D'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-D']=v)),
-            _eqRow('Oxygen Cylinders', _inventoryDraft!['E-O'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-O']=v)),
-            const Gap(32),
-            Row(
-              children: [
-                Expanded(child: OutlinedButton(onPressed: ()=>Navigator.pop(c), child: const Text('Cancel'))),
-                const Gap(12),
-                Expanded(child: ElevatedButton(onPressed: (){
-                  _inventoryDraft!.forEach((id, val) {
-                    ref.read(resourcesProvider.notifier).updateCount(id, val);
-                  });
-                  Navigator.pop(c);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Inventory levels updated successfully.')));
-                }, child: const Text('Update Inventory'))),
-              ],
-            ),
-            const Gap(32),
-        ])));
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.7,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Resource Inventory', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+                  IconButton(onPressed: () => Navigator.pop(c), icon: const Icon(Icons.close)),
+                ],
+              ),
+              const Gap(8),
+              const Text('Manage critical supplies and blood bank levels', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              const Gap(16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('Blood Bank (Units)', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary, fontSize: 13)),
+                      const Gap(12),
+                      GridView.count(
+                        crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 2.5,
+                        children: [
+                          _resCard('A+', _inventoryDraft!['B-A'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-A']=v)),
+                          _resCard('B+', _inventoryDraft!['B-B'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-B']=v)),
+                          _resCard('O+', _inventoryDraft!['B-O'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-O']=v)),
+                          _resCard('AB+', _inventoryDraft!['B-AB'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-AB']=v)),
+                        ],
+                      ),
+                      const Gap(24),
+                      const Text('Critical Equipment', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary, fontSize: 13)),
+                      const Gap(12),
+                      _eqRow('Ventilators', _inventoryDraft!['E-V'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-V']=v)),
+                      _eqRow('Defibrillators', _inventoryDraft!['E-D'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-D']=v)),
+                      _eqRow('Oxygen Cylinders', _inventoryDraft!['E-O'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-O']=v)),
+                      const Gap(12),
+                    ],
+                  ),
+                ),
+              ),
+              const Gap(16),
+              Container(
+                padding: const EdgeInsets.only(top: 16),
+                decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppTheme.divider))),
+                child: Row(
+                  children: [
+                    Expanded(child: OutlinedButton(onPressed: ()=>Navigator.pop(c), child: const Text('Cancel'))),
+                    const Gap(12),
+                    Expanded(child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white),
+                      onPressed: (){
+                        _inventoryDraft!.forEach((id, val) {
+                          ref.read(resourcesProvider.notifier).updateCount(id, val);
+                        });
+                        Navigator.pop(c);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Inventory levels updated successfully.')));
+                      }, child: const Text('Update Inventory'))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
       });
     });
   }

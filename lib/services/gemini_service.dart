@@ -2,7 +2,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 class GeminiService {
-  static int _currentKeyIndex = 0;
   static final List<String> _keys = [
     dotenv.env['GEMINI_API_KEY'] ?? '',
     dotenv.env['GEMINI_API_KEY_1'] ?? '',
@@ -10,28 +9,49 @@ class GeminiService {
     dotenv.env['GEMINI_API_KEY_3'] ?? '',
   ].where((k) => k.isNotEmpty).toList();
 
-  static String get _activeKey {
-    if (_keys.isEmpty) return '';
-    final key = _keys[_currentKeyIndex];
-    _currentKeyIndex = (_currentKeyIndex + 1) % _keys.length;
-    return key;
+  static int _currentKeyIndex = 0;
+
+  /// Helper to execute an AI call with automatic key rotation on failure.
+  static Future<T> _executeWithRetry<T>(
+    Future<T> Function(GenerativeModel model) action,
+  ) async {
+    if (_keys.isEmpty) throw Exception('Missing API Key(s) in .env');
+
+    int attempts = 0;
+    Object? lastError;
+
+    while (attempts < _keys.length) {
+      final key = _keys[_currentKeyIndex];
+      final model = GenerativeModel(
+        model: 'gemini-flash-latest',
+        apiKey: key,
+      );
+
+      try {
+        return await action(model);
+      } catch (e) {
+        lastError = e;
+        print('Gemini Error (Key Index: $_currentKeyIndex, Attempt: ${attempts + 1}): $e');
+        
+        // Rotate to next key for next attempt
+        _currentKeyIndex = (_currentKeyIndex + 1) % _keys.length;
+        attempts++;
+        
+        // If it's a rate limit or server error, we retry. 
+        // If it's a bad request (e.g. safety blocks), retrying might not help but we do it anyway for robustness.
+      }
+    }
+
+    throw Exception('AI exhausted all available API keys. Last error: $lastError');
   }
 
   static Future<String> chat({
     required String userMessage,
     required String hospitalContext,
   }) async {
-    final key = _activeKey;
-    if (key.isEmpty) return 'AI Error: Missing API Key(s) in .env';
-    
     try {
-      final model = GenerativeModel(
-        model: 'gemini-1.5-flash',
-        apiKey: key,
-        // v1beta is often the default, specify v1 if needed via safetySettings or other config
-      );
-
-      final prompt = '''
+      return await _executeWithRetry((model) async {
+        final prompt = '''
 You are RapidCare AI, a hospital emergency coordination assistant. 
 Answer ONLY about hospital operations. Be brief and direct.
 
@@ -40,31 +60,21 @@ $hospitalContext
 
 Staff question: $userMessage
 ''';
-      
-      final response = await model.generateContent([Content.text(prompt)]);
-      return response.text ?? 'Unable to process request.';
+        
+        final response = await model.generateContent([Content.text(prompt)]);
+        return response.text ?? 'Unable to process request.';
+      });
     } catch (e) {
-      print('Gemini chat error (key index $_currentKeyIndex): $e');
-      if (e.toString().contains('429')) {
-         return 'AI rate limited. Retrying next key...';
-      }
-      return 'AI unavailable. Check network or API limits.';
+      return 'AI currently unavailable: ${e.toString()}';
     }
   }
 
   static Future<String> analyzeClinical({
     required String patientData,
   }) async {
-    final key = _activeKey;
-    if (key.isEmpty) return 'Analysis Error: Missing API Key';
-
     try {
-      final model = GenerativeModel(
-        model: 'gemini-1.5-flash',
-        apiKey: key,
-      );
-
-      final prompt = '''
+      return await _executeWithRetry((model) async {
+        final prompt = '''
 You are a senior medical consultant. Analyze the following patient data and provide a structured synthesis.
 
 FORMAT REQUIREMENTS:
@@ -80,11 +90,11 @@ $patientData
 Provide clinical, professional, and concise output.
 ''';
 
-      final response = await model.generateContent([Content.text(prompt)]);
-      return response.text ?? 'Analysis failed.';
+        final response = await model.generateContent([Content.text(prompt)]);
+        return response.text ?? 'Analysis failed.';
+      });
     } catch (e) {
-      print('Gemini analyzeClinical error: $e');
-      return 'AI unreachable for clinical analysis. Try again later.';
+      return 'AI clinical analysis failed: ${e.toString()}';
     }
   }
 }

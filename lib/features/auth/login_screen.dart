@@ -41,8 +41,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       valid = false;
     }
 
-    if (pwd.length < 6) {
-      _pwdError = "Password must be at least 6 characters";
+    // Password rule: 3 characters + 1 special character + 4 characters
+    final pwdRegex = RegExp(r'^[a-zA-Z0-9]{3}[^a-zA-Z0-9][a-zA-Z0-9]{4}.*$');
+    if (!pwdRegex.hasMatch(pwd)) {
+      _pwdError = "Required: 3 chars, 1 special, then 4 chars (e.g. ABC@1234)";
       valid = false;
     }
 

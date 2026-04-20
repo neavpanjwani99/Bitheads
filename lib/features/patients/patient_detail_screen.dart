@@ -111,10 +111,23 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
   }
 
   void _generateHandover(PatientModel patient) async {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (c) => const Center(child: CircularProgressIndicator())
+      useRootNavigator: true,
+      builder: (c) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const Gap(16),
+            const Text('AI is analyzing patient context...', style: TextStyle(fontWeight: FontWeight.w500)),
+            const Text('This may take a moment if servers are busy', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+          ],
+        ),
+      )
     );
 
     final contextData = '''
@@ -131,12 +144,12 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
       final summary = await GeminiService.chat(userMessage: prompt, hospitalContext: 'Staff Handover Mode');
 
       if (!mounted) return;
-      Navigator.pop(context); // Close loading
+      navigator.pop(); // Close loading dialog specifically
 
       _showHandoverResult(summary);
     } catch (e) {
        if (!mounted) return;
-       Navigator.pop(context);
+       navigator.pop();
        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Handover generation failed: $e')));
     }
   }
