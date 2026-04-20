@@ -1,76 +1,59 @@
+import '../../mock/mock_data.dart';
 import '../../models/staff_model.dart';
+import 'staff_graph.dart';
 
-/// Pure DSA Implementation: Stable Merge Sort for Staff Multiple Criteria
+/// Stability-preserving sorting logic for hospital staff.
+/// Uses Merge Sort to ensure O(n log n) efficiency and stable results.
 class StaffSorter {
-  /// Sort staff by:
-  /// 1. Availability (true first)
-  /// 2. Response Time (lower first)
-  /// 3. Assigned Patient Count (lower first)
-  static void mergeSort(List<StaffModel> arr) {
-    if (arr.length <= 1) return;
-    
-    // We need actual assignment count and response times.
-    // For this generic sorter, we rely on properties inside StaffModel.
-    _splitAndMerge(arr, 0, arr.length - 1);
+  
+  /// Performs a stable Merge Sort on the provided list.
+  /// Time Complexity: O(n log n)
+  /// Space Complexity: O(n)
+  static List<StaffModel> mergeSort(
+      List<StaffModel> list,
+      int Function(StaffModel, StaffModel) compare) {
+    if (list.length <= 1) return list;
+
+    int mid = list.length ~/ 2;
+    final left = mergeSort(list.sublist(0, mid), compare);
+    final right = mergeSort(list.sublist(mid), compare);
+
+    return _merge(left, right, compare);
   }
 
-  static void _splitAndMerge(List<StaffModel> arr, int left, int right) {
-    if (left < right) {
-      int mid = left + (right - left) ~/ 2;
-      _splitAndMerge(arr, left, mid);
-      _splitAndMerge(arr, mid + 1, right);
-      _merge(arr, left, mid, right);
-    }
-  }
+  static List<StaffModel> _merge(
+      List<StaffModel> left,
+      List<StaffModel> right,
+      int Function(StaffModel, StaffModel) compare) {
+    List<StaffModel> result = [];
+    int i = 0;
+    int j = 0;
 
-  static void _merge(List<StaffModel> arr, int left, int mid, int right) {
-    int n1 = mid - left + 1;
-    int n2 = right - mid;
-
-    List<StaffModel> L = List.generate(n1, (i) => arr[left + i]);
-    List<StaffModel> R = List.generate(n2, (i) => arr[mid + 1 + i]);
-
-    int i = 0, j = 0, k = left;
-
-    while (i < n1 && j < n2) {
-      if (_compareStaff(L[i], R[j]) <= 0) {
-        arr[k] = L[i];
-        i++;
+    while (i < left.length && j < right.length) {
+      if (compare(left[i], right[j]) <= 0) {
+        result.add(left[i++]);
       } else {
-        arr[k] = R[j];
-        j++;
+        result.add(right[j++]);
       }
-      k++;
     }
 
-    while (i < n1) {
-      arr[k] = L[i];
-      i++;
-      k++;
-    }
-
-    while (j < n2) {
-      arr[k] = R[j];
-      j++;
-      k++;
-    }
+    result.addAll(left.sublist(i));
+    result.addAll(right.sublist(j));
+    return result;
   }
 
-  /// Returns negative if a < b, positive if a > b, 0 if equal
-  static int _compareStaff(StaffModel a, StaffModel b) {
-    // 1. Availability (true comes first)
-    if (a.available && !b.available) return -1;
-    if (!a.available && b.available) return 1;
+  /// Sorts staff by availability (Online first).
+  static List<StaffModel> byAvailability(List<StaffModel> staff) {
+    return mergeSort(staff, (a, b) {
+      if (a.available && !b.available) return -1;
+      if (!a.available && b.available) return 1;
+      return 0;
+    });
+  }
 
-    // 2. Response time
-    if (a.averageResponseTimeSecs < b.averageResponseTimeSecs) return -1;
-    if (a.averageResponseTimeSecs > b.averageResponseTimeSecs) return 1;
-
-    // 3. Workload (assigned patients)
-    if (a.patientCount < b.patientCount) return -1;
-    if (a.patientCount > b.patientCount) return 1;
-
-    // Stable tie-breaker: UID
-    return a.uid.compareTo(b.uid);
+  /// Sorts staff by current workload (Least loaded first).
+  static List<StaffModel> byWorkload(List<StaffModel> staff, StaffGraph graph) {
+    return mergeSort(staff, (a, b) =>
+        graph.getWorkload(a.uid).compareTo(graph.getWorkload(b.uid)));
   }
 }

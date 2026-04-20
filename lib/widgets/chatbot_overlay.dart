@@ -11,12 +11,13 @@ class ChatbotOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FloatingActionButton(
+      heroTag: 'chatbot_fab', 
       onPressed: () {
         showModalBottomSheet(
           context: context,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
-          builder: (ctx) => const _ChatbotSheet(),
+          builder: (ctx) => const ChatbotScreen(),
         );
       },
       backgroundColor: AppTheme.primary,
@@ -26,17 +27,43 @@ class ChatbotOverlay extends StatelessWidget {
   }
 }
 
-class _ChatbotSheet extends ConsumerStatefulWidget {
-  const _ChatbotSheet();
-
+class ChatbotScreen extends ConsumerStatefulWidget {
+  const ChatbotScreen({super.key});
   @override
-  ConsumerState<_ChatbotSheet> createState() => _ChatbotSheetState();
+  ConsumerState<ChatbotScreen> createState() => _ChatbotScreenState();
 }
 
-class _ChatbotSheetState extends ConsumerState<_ChatbotSheet> {
+class _ChatbotScreenState extends ConsumerState<ChatbotScreen> {
   final TextEditingController _controller = TextEditingController();
   final List<Map<String, dynamic>> _messages = [];
   bool _isTyping = false;
+
+  String _buildHospitalContext() {
+    final beds = ref.read(bedsProvider);
+    final staff = ref.read(staffProvider);
+    final alerts = ref.read(alertsProvider);
+    final patients = ref.read(patientsProvider);
+    
+    final availableBeds = beds.where((b) => b.status == 'Available').length;
+    final onlineStaff = staff.where((s) => s.available).length;
+    final activeAlerts = alerts.where((a) => a.status == 'Active').length;
+    final criticalAlerts = alerts.where((a) => a.severity == 'CRITICAL' && a.status == 'Active').length;
+
+    return '''
+Beds: ${beds.length} total, 
+  $availableBeds available,
+  ICU: ${beds.where((b) => b.type=='ICU' && b.status=='Available').length} free,
+  General: ${beds.where((b) => b.type=='General' && b.status=='Available').length} free,
+  Emergency: ${beds.where((b) => b.type=='Emergency' && b.status=='Available').length} free
+Staff: ${staff.length} total, 
+  $onlineStaff online,
+  Docs available: ${staff.where((s) => s.role=='Doctor' && s.available).length},
+  Nurses available: ${staff.where((s) => s.role=='Nurse' && s.available).length}
+Alerts: $activeAlerts active ($criticalAlerts critical)
+Patients: ${patients.length} total,
+  Critical: ${patients.where((p) => p.triageLevel=='CRITICAL').length}
+    ''';
+  }
 
   void _sendMessage(String text) async {
     if (text.trim().isEmpty) return;
@@ -47,40 +74,10 @@ class _ChatbotSheetState extends ConsumerState<_ChatbotSheet> {
     });
     _controller.clear();
 
-    // Build context string from providers
-    final beds = ref.read(bedsProvider);
-    final staff = ref.read(staffProvider);
-    final alerts = ref.read(alertsProvider);
-    final patients = ref.read(patientsProvider);
-    
-    int totBeds = beds.length;
-    int avBeds = beds.where((b)=>b.status=='Available').length;
-    int avIcu = beds.where((b)=>b.status=='Available' && b.type=='ICU').length;
-    int avGen = beds.where((b)=>b.status=='Available' && b.type=='General').length;
-    int avEmr = beds.where((b)=>b.status=='Available' && b.type=='Emergency').length;
-    
-    int onS = staff.where((s)=>s.available).length;
-    int onD = staff.where((s)=>s.role=='Doctor' && s.available).length;
-    int onN = staff.where((s)=>s.role=='Nurse' && s.available).length;
-    
-    int actA = alerts.where((a)=>a.status=='Active').length;
-    int criA = alerts.where((a)=>a.status=='Active' && a.severity=='CRITICAL').length;
-    int urgA = alerts.where((a)=>a.status=='Active' && a.severity=='URGENT').length;
-    
-    int pTot = patients.length;
-    int pCri = patients.where((p)=>p.triageLevel=='CRITICAL').length;
-
-    String prompt = '''
-Hospital data: 
-Beds: $totBeds total, $avBeds available (ICU:$avIcu General:$avGen Emergency:$avEmr)
-Staff: $onS online, $onD doctors available, $onN nurses available  
-Alerts: $actA active ($criA critical, $urgA urgent)
-Patients: $pTot total, $pCri critical
-User question: $text
-Answer briefly, concisely and professionally as a hospital AI assistant.
-''';
-    
-    String response = await GeminiService.generateResponse(prompt);
+    final response = await GeminiService.chat(
+      userMessage: text,
+      hospitalContext: _buildHospitalContext()
+    );
     
     if (!mounted) return;
     setState(() {
@@ -100,10 +97,19 @@ Answer briefly, concisely and professionally as a hospital AI assistant.
       child: Column(
         children: [
           _buildHeader(),
-          Expanded(
-            child: _messages.isEmpty ? _buildSuggestions() : _buildChatList(),
-          ),
-          if (_isTyping) const Padding(padding: EdgeInsets.all(8), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [SizedBox(height: 16, width:16, child: CircularProgressIndicator(strokeWidth: 2)), Gap(12), Text('AI processing...', style: TextStyle(color: AppTheme.textSecondary))])),
+          Expanded(child: _messages.isEmpty ? _buildSuggestions() : _buildChatList()),
+          if (_isTyping) 
+            const Padding(
+              padding: EdgeInsets.all(12), 
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center, 
+                children: [
+                  SizedBox(height: 12, width: 12, child: CircularProgressIndicator(strokeWidth: 2)), 
+                  Gap(12), 
+                  Text('Analyzing hospital ops...', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))
+                ]
+              )
+            ),
           _buildInput(),
         ],
       ),
@@ -125,8 +131,8 @@ Answer briefly, concisely and professionally as a hospital AI assistant.
           const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('RapidCare AI', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-              Text('Powered by Gemini-1.5-Flash', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              Text('RapidCare AI Assistant', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+              Text('Powered by Gemini AI', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
             ],
           ),
           const Spacer(),
@@ -142,7 +148,7 @@ Answer briefly, concisely and professionally as a hospital AI assistant.
         spacing: 8, runSpacing: 8,
         alignment: WrapAlignment.center,
         children: [
-          'Bed availability', 'Staff online', 'Active alerts', 'Patient triage status'
+          'Bed availability', 'Staff online', 'Active alerts', 'Patient queue', 'Triage help'
         ].map((t) => ActionChip(
           label: Text(t, style: const TextStyle(color: AppTheme.textPrimary)),
           backgroundColor: AppTheme.surface,
@@ -167,8 +173,8 @@ Answer briefly, concisely and professionally as a hospital AI assistant.
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: isUser ? AppTheme.primary : AppTheme.surface,
-              border: isUser ? null : Border.all(color: AppTheme.divider),
+              color: isUser ? AppTheme.primary : const Color(0xFFEFF6FF),
+              border: isUser ? null : Border.all(color: AppTheme.primaryLight),
               borderRadius: BorderRadius.circular(16).copyWith(
                 bottomRight: isUser ? const Radius.circular(0) : null,
                 bottomLeft: !isUser ? const Radius.circular(0) : null,

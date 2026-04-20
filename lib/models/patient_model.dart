@@ -11,6 +11,9 @@ class PatientModel {
   final String vitalStatus;
   final List<String> notes;
   final String attendanceStatus; // 'Pending', 'Attended', 'Not_Attended'
+  final List<String> orders;
+  final List<int> vitalsTrend;
+  final List<Map<String, dynamic>> events;
 
   PatientModel({
     required this.id,
@@ -25,6 +28,9 @@ class PatientModel {
     this.vitalStatus = 'normal',
     this.notes = const [],
     this.attendanceStatus = 'Pending',
+    this.orders = const [],
+    this.vitalsTrend = const [72, 75, 71, 78, 74],
+    this.events = const [],
   });
 
   PatientModel copyWith({
@@ -40,6 +46,9 @@ class PatientModel {
     String? vitalStatus,
     List<String>? notes,
     String? attendanceStatus,
+    List<String>? orders,
+    List<int>? vitalsTrend,
+    List<Map<String, dynamic>>? events,
   }) {
     return PatientModel(
       id: id ?? this.id,
@@ -54,6 +63,9 @@ class PatientModel {
       vitalStatus: vitalStatus ?? this.vitalStatus,
       notes: notes ?? this.notes,
       attendanceStatus: attendanceStatus ?? this.attendanceStatus,
+      orders: orders ?? this.orders,
+      vitalsTrend: vitalsTrend ?? this.vitalsTrend,
+      events: events ?? this.events,
     );
   }
 

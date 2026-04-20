@@ -1,65 +1,45 @@
-import '../../models/staff_model.dart';
-import '../../models/patient_model.dart';
-
-/// Pure DSA Implementation: Adjacency List representing Staff -> Patient Assignments
+/// Adjacency List representing the relationships between staff (doctors) and patients.
+/// This allows for efficient workload tracking and assignment validation.
 class StaffGraph {
-  // Map of Staff UID -> List of assigned Patient IDs
-  final Map<String, List<String>> _adjacencyList = {};
+  /// Map of doctorId -> list of patientIds
+  final Map<String, List<String>> _adjacency = {};
 
-  // For fast constraint checking: Patient ID -> Assigned Staff UID
-  final Map<String, String> _patientToStaffMap = {};
-
-  void addStaffNode(StaffModel staff) {
-    if (!_adjacencyList.containsKey(staff.uid)) {
-      _adjacencyList[staff.uid] = [];
-    }
+  /// Ensures a staff member exists in the graph.
+  void addStaff(String staffId) {
+    _adjacency.putIfAbsent(staffId, () => []);
   }
 
-  void removeStaffNode(String uid) {
-    List<String>? patients = _adjacencyList[uid];
-    if (patients != null) {
-      for (String pId in patients) {
-        _patientToStaffMap.remove(pId);
+  /// Assigns a patient to a doctor.
+  /// Prevents double-assignment by checking if the patient already exists in any doctor's list.
+  /// Time Complexity: O(Total Patients)
+  bool assignPatient(String doctorId, String patientId) {
+    // Check if patient already assigned to ANY doctor
+    for (var patients in _adjacency.values) {
+      if (patients.contains(patientId)) {
+        return false; // Already assigned
       }
     }
-    _adjacencyList.remove(uid);
-  }
-
-  /// Add an edge between a staff member and a patient. 
-  /// Enforces constraint: One patient cannot have >1 assigned primary staff.
-  bool assignPatientToStaff(String staffUid, String patientId) {
-    if (!_adjacencyList.containsKey(staffUid)) {
-      addStaffNode(StaffModel(uid: staffUid, name: 'temp', email: 'temp@temp.com', role: 'temp', specialization: 'temp', available: true));
-    }
-
-    // Constraint Check: Is patient already assigned to someone else?
-    if (_patientToStaffMap.containsKey(patientId)) {
-      String currentStaff = _patientToStaffMap[patientId]!;
-      if (currentStaff == staffUid) {
-        return true; // Already assigned here
-      }
-      return false; // Collision: Assigned to another staff node!
-    }
-
-    _adjacencyList[staffUid]!.add(patientId);
-    _patientToStaffMap[patientId] = staffUid;
+    _adjacency.putIfAbsent(doctorId, () => []);
+    _adjacency[doctorId]!.add(patientId);
     return true;
   }
 
-  void unassignPatient(String patientId) {
-    if (!_patientToStaffMap.containsKey(patientId)) return;
-    String staffUid = _patientToStaffMap[patientId]!;
-    _adjacencyList[staffUid]?.remove(patientId);
-    _patientToStaffMap.remove(patientId);
-  }
-  
-  List<String> getPatientsForStaff(String staffUid) {
-    return _adjacencyList[staffUid] ?? [];
-  }
-  
-  String? getStaffForPatient(String patientId) {
-    return _patientToStaffMap[patientId];
+  /// Removes a patient assignment from a doctor.
+  void removePatient(String doctorId, String patientId) {
+    _adjacency[doctorId]?.remove(patientId);
   }
 
-  Map<String, List<String>> get adjacencyListSnapshot => Map.unmodifiable(_adjacencyList);
+  /// Returns read-only list of patients for a doctor.
+  List<String> getPatientsOf(String doctorId) =>
+      List.unmodifiable(_adjacency[doctorId] ?? []);
+
+  /// Returns the current workload (count of patients) for a doctor.
+  int getWorkload(String doctorId) => _adjacency[doctorId]?.length ?? 0;
+
+  /// Suggests the doctor with the least workload from a list of available doctors.
+  String? getLeastLoadedDoctor(List<String> availableDoctorIds) {
+    if (availableDoctorIds.isEmpty) return null;
+    return availableDoctorIds.reduce((a, b) =>
+        getWorkload(a) <= getWorkload(b) ? a : b);
+  }
 }

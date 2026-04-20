@@ -1,4 +1,6 @@
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../widgets/chatbot_overlay.dart';
 import '../features/auth/login_screen.dart';
 import '../features/admin/admin_dashboard_screen.dart';
 import '../features/beds/bed_tracker_screen.dart';
@@ -19,6 +21,11 @@ final router = GoRouter(
       path: '/login',
       builder: (context, state) => const LoginScreen(),
     ),
+    ShellRoute(
+      builder: (context, state, child) {
+        return AppShell(child: child);
+      },
+      routes: [
     GoRoute(
       path: '/admin',
       builder: (context, state) => const AdminDashboardScreen(),
@@ -76,5 +83,26 @@ final router = GoRouter(
         return PatientDetailScreen(patientId: patientId);
       },
     ),
+      ]
+    ),
   ],
 );
+
+class AppShell extends StatelessWidget {
+  final Widget child;
+  const AppShell({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        child, // the actual screen
+        Positioned(
+          bottom: 80, // above bottom nav or general clearance
+          right: 16,
+          child: const ChatbotOverlay(),
+        )
+      ]
+    );
+  }
+}

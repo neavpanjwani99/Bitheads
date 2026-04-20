@@ -39,11 +39,11 @@ class PatientsNotifier extends Notifier<List<PatientModel>> {
 final patientsProvider = NotifierProvider<PatientsNotifier, List<PatientModel>>(PatientsNotifier.new);
 
 // INCOMING PATIENTS
-final globalPatientQueue = PatientQueue();
+final globalPatientQueue = PatientQueue<PatientModel>();
 class IncomingPatientNotifier extends Notifier<List<PatientModel>> {
   @override
   List<PatientModel> build() {
-    globalPatientQueue.enqueue(PatientModel(id: 'INC-1', name: 'Unknown Male', age: 35, gender: 'M', triageLevel: 'UNASSIGNED', vitalsSummary: 'Accident Trauma'));
+    // Initial data if needed, or leave empty if using global data
     return globalPatientQueue.toList();
   }
 
@@ -53,8 +53,10 @@ class IncomingPatientNotifier extends Notifier<List<PatientModel>> {
   }
 
   void startTriageAndRemove() {
-    globalPatientQueue.dequeue();
-    state = globalPatientQueue.toList();
+    if (!globalPatientQueue.isEmpty) {
+      globalPatientQueue.dequeue();
+      state = globalPatientQueue.toList();
+    }
   }
 }
 final incomingPatientProvider = NotifierProvider<IncomingPatientNotifier, List<PatientModel>>(IncomingPatientNotifier.new);
@@ -81,11 +83,6 @@ final globalAlertQueue = AlertPriorityQueue();
 class AlertNotifier extends Notifier<List<AlertModel>> {
   @override
   List<AlertModel> build() {
-    final alert1 = AlertModel(id: 'A1', type: 'Mass Casualty', severity: 'CRITICAL', target: 'All Staff', message: 'Highway pileup, expecting 20+ casualties. All hands on deck.', createdAt: DateTime.now().subtract(const Duration(minutes: 5)), status: 'Active');
-    final alert2 = AlertModel(id: 'A2', type: 'Drug Shortage', severity: 'URGENT', target: 'Pharmacy & Doctors', message: 'Epinephrine stocks critically low below threshold.', createdAt: DateTime.now().subtract(const Duration(minutes: 12)), status: 'Active');
-    
-    globalAlertQueue.insert(alert1);
-    globalAlertQueue.insert(alert2);
     return globalAlertQueue.toList();
   }
 
@@ -95,7 +92,6 @@ class AlertNotifier extends Notifier<List<AlertModel>> {
   }
   
   void updateStatus(String id, String newStatus) {
-    // In a real heap you'd update/re-heapify, but since we recreate list from internal list:
     final current = globalAlertQueue.toList();
     final updated = current.map((a) => a.id == id ? AlertModel(id: a.id, type:a.type, severity:a.severity, target:a.target, message:a.message, createdAt:a.createdAt, status:newStatus) : a).toList();
     globalAlertQueue.clear();
@@ -121,11 +117,3 @@ class StaffNotifier extends Notifier<List<StaffModel>> {
   }
 }
 final staffProvider = NotifierProvider<StaffNotifier, List<StaffModel>>(StaffNotifier.new);
-
-// Mass Casualty Mode Provider
-class MassCasualtyNotifier extends Notifier<bool> {
-  @override
-  bool build() => false;
-  void toggle() => state = !state;
-}
-final massCasualtyProvider = NotifierProvider<MassCasualtyNotifier, bool>(MassCasualtyNotifier.new);

@@ -1,28 +1,41 @@
 import '../../models/bed_model.dart';
 
-/// Pure DSA Implementation: Binary Search for Beds
+/// Performance-focused search utility for hospital beds.
 class BedSearch {
-  /// Assumes `sortedBeds` is pre-sorted by Bed ID.
-  /// Throws if list is not sorted, though we expect caller to maintain order.
-  static BedModel? binarySearch(List<BedModel> sortedBeds, String targetId) {
-    int left = 0;
-    int right = sortedBeds.length - 1;
+  
+  /// Sorts beds by Bed ID to prepare for binary search.
+  /// O(n log n)
+  static List<BedModel> sortById(List<BedModel> beds) {
+    final sorted = List<BedModel>.from(beds);
+    sorted.sort((a, b) => a.id.compareTo(b.id));
+    return sorted;
+  }
 
-    while (left <= right) {
-      int mid = left + ((right - left) ~/ 2);
-      int comparison = sortedBeds[mid].id.compareTo(targetId);
+  /// Performs a Binary Search for a specific Bed ID.
+  /// Requires the list to be sorted by [bedId].
+  /// Time Complexity: O(log n)
+  static BedModel? binarySearch(List<BedModel> sortedBeds, String id) {
+    int low = 0;
+    int high = sortedBeds.length - 1;
 
-      if (comparison == 0) {
+    while (low <= high) {
+      int mid = (low + high) ~/ 2;
+      int cmp = sortedBeds[mid].id.compareTo(id);
+
+      if (cmp == 0) {
         return sortedBeds[mid];
-      } else if (comparison < 0) {
-        // target is greater
-        left = mid + 1;
+      } else if (cmp < 0) {
+        low = mid + 1;
       } else {
-        // target is smaller
-        right = mid - 1;
+        high = mid - 1;
       }
     }
-    
-    return null; // Not found
+    return null;
+  }
+
+  /// Linear filter by status.
+  /// O(n)
+  static List<BedModel> filterByStatus(List<BedModel> beds, String status) {
+    return beds.where((b) => b.status == status).toList();
   }
 }

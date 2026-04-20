@@ -7,8 +7,11 @@ import '../../mock/mock_data.dart';
 import '../../mock/concerns_provider.dart';
 import '../../mock/announcements_provider.dart';
 import '../../models/patient_model.dart';
-import '../../widgets/chatbot_overlay.dart';
+import '../../providers/session_provider.dart';
+import '../../providers/resources_provider.dart';
 import '../alerts/widgets/alert_card.dart';
+import '../../providers/clinical_status_providers.dart';
+import '../../widgets/mass_casualty_banner.dart';
 
 class DoctorDashboardScreen extends ConsumerStatefulWidget {
   const DoctorDashboardScreen({super.key});
@@ -42,18 +45,32 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
     // For work history logic
     List<PatientModel> completedPatients = allMyPatients.where((p) => p.attendanceStatus != 'Pending').toList();
 
+    final massCasualty = ref.watch(massCasualtyProvider);
+    ref.watch(secondTickerProvider); // Rebuild for timers
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Physician Portal'),
-        actions: [IconButton(icon: const Icon(Icons.logout_outlined), onPressed: () => context.go('/login'))],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout_outlined), 
+            onPressed: () {
+              ref.read(sessionProvider.notifier).endSession();
+              context.go('/login');
+            }
+          )
+        ],
       ),
-      floatingActionButton: const ChatbotOverlay(),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: Column(
+        children: [
+          if (massCasualty) const MassCasualtyBanner(),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
             // Header
             Row(
               children: [
@@ -77,6 +94,8 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
               ...announcements.map((a) => _buildAnnouncementBanner(a)),
               const Gap(16),
             ],
+
+
 
             Row(
               children: [
@@ -133,8 +152,11 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
           ],
         ),
       ),
-    );
-  }
+    ),
+  ],
+),
+);
+}
 
   Widget _buildAvailToggle(bool isAvail, VoidCallback onTap) {
     return InkWell(
@@ -189,8 +211,9 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
                 const Gap(16),
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(labelText: 'Related Patient'),
+                  value: selPat,
                   items: patients.map((p)=>DropdownMenuItem(value: p.id, child: Text(p.name))).toList(),
-                  onChanged: (v)=>selPat=v
+                  onChanged: (v)=>setState(()=>selPat=v)
                 ),
                 const Gap(12),
                 const Text('Request Type', style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textSecondary, fontSize: 13)),
@@ -241,6 +264,16 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
 
   Widget _buildPatientCard(PatientModel p, BuildContext context) {
     Color riskColor = p.riskScore > 70 ? AppTheme.critical : (p.riskScore > 30 ? AppTheme.urgent : AppTheme.stable);
+
+    // Golden Hour logic
+    int remaining = 0;
+    if (p.triageLevel == 'CRITICAL') {
+      remaining = ref.read(goldenHourProvider.notifier).getRemainingSeconds(p.id);
+      if (remaining == 0 && !ref.read(goldenHourProvider).containsKey(p.id)) {
+        Future.microtask(() => ref.read(goldenHourProvider.notifier).start(p.id, DateTime.now()));
+      }
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
@@ -262,6 +295,15 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
               Row(
                 children: [
                   Text(p.triageLevel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.triageLevel == 'CRITICAL' ? AppTheme.critical : AppTheme.textSecondary)),
+                  if (p.triageLevel == 'CRITICAL' && remaining > 0) ...[
+                    const Text(' • ', style: TextStyle(color: AppTheme.textSecondary)),
+                    Icon(Icons.timer_outlined, size: 12, color: remaining < 600 ? AppTheme.critical : AppTheme.urgent),
+                    const Gap(2),
+                    Text(
+                      '${(remaining ~/ 60).toString().padLeft(2,'0')}:${(remaining % 60).toString().padLeft(2,'0')}',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: remaining < 600 ? AppTheme.critical : AppTheme.urgent),
+                    ),
+                  ],
                   const Text(' • ', style: TextStyle(color: AppTheme.textSecondary)),
                   Text('${p.assignedBedId}', style: const TextStyle(color: AppTheme.textSecondary)),
                 ],
@@ -294,17 +336,25 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
   }
 
   Widget _buildLoginHistory() {
-    return ListView(
+    final sessions = ref.watch(sessionProvider);
+    
+    return ListView.builder(
       padding: const EdgeInsets.all(16),
-      children: [
-        _histItem('Today, 07:55', 'Logout: --', 'Duration: Active', 'Device: Mobile (iOS)'),
-        _histItem('17 Apr, 07:45', 'Logout: 16:10', 'Duration: 8h 25m', 'Device: Mobile (iOS)'),
-        _histItem('16 Apr, 07:50', 'Logout: 16:00', 'Duration: 8h 10m', 'Device: Mobile (iOS)'),
-        _histItem('15 Apr, 07:58', 'Logout: 16:15', 'Duration: 8h 17m', 'Device: Mobile (iOS)'),
-        _histItem('14 Apr, 07:52', 'Logout: 16:05', 'Duration: 8h 13m', 'Device: Mobile (iOS)'),
-        _histItem('13 Apr, 07:44', 'Logout: 16:00', 'Duration: 8h 16m', 'Device: Mobile (iOS)'),
-        _histItem('12 Apr, 07:56', 'Logout: 16:20', 'Duration: 8h 24m', 'Device: Mobile (Android)'),
-      ],
+      itemCount: sessions.length,
+      itemBuilder: (context, index) {
+        final session = sessions[index];
+        final isToday = session.loginTime.day == DateTime.now().day;
+        final dateStr = isToday ? 'Today, ' : '${session.loginTime.day} Apr, ';
+        final loginTimeStr = '${session.loginTime.hour.toString().padLeft(2,'0')}:${session.loginTime.minute.toString().padLeft(2,'0')}';
+        final logoutTimeStr = session.logoutTime == null ? '--' : '${session.logoutTime!.hour.toString().padLeft(2,'0')}:${session.logoutTime!.minute.toString().padLeft(2,'0')}';
+        
+        return _histItem(
+          '$dateStr$loginTimeStr', 
+          'Logout: $logoutTimeStr', 
+          'Duration: ${session.duration}', 
+          'Device: ${session.device}'
+        );
+      },
     );
   }
 
@@ -352,4 +402,7 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
       ),
     );
   }
+
+
 }
+

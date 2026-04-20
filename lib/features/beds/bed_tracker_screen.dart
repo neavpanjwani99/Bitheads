@@ -30,37 +30,47 @@ class _BedTrackerScreenState extends ConsumerState<BedTrackerScreen> with Single
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      isScrollControlled: true,
       builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('Update Bed Status: ${bed.id}', style: Theme.of(context).textTheme.headlineMedium),
-                const Gap(8),
-                const Text('Selecting a new status applies changes instantly across the hospital command network.', style: TextStyle(color: AppTheme.textSecondary)),
-                const Gap(32),
-                
-                _buildStatusButton('Available', AppTheme.stable, Icons.check_circle_outline, () {
-                  ref.read(bedsProvider.notifier).updateBedStatus(bed.id, 'Available');
-                  Navigator.pop(context);
-                }),
-                const Gap(12),
-                _buildStatusButton('Occupied', AppTheme.critical, Icons.do_not_disturb_on, () {
-                  ref.read(bedsProvider.notifier).updateBedStatus(bed.id, 'Occupied');
-                  Navigator.pop(context);
-                }),
-                const Gap(12),
-                _buildStatusButton('Reserved', AppTheme.urgent, Icons.warning_amber_rounded, () {
-                  ref.read(bedsProvider.notifier).updateBedStatus(bed.id, 'Reserved');
-                  Navigator.pop(context);
-                }),
-                const Gap(24),
-              ],
-            ),
-          ),
+        return DraggableScrollableSheet(
+          initialChildSize: 0.5,
+          maxChildSize: 0.8,
+          minChildSize: 0.3,
+          expand: false,
+          builder: (context, scrollController) {
+            return SafeArea(
+              child: SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Update Bed Status: ${bed.id}', style: Theme.of(context).textTheme.headlineMedium),
+                    const Gap(8),
+                    const Text('Selecting a new status applies changes instantly across the hospital command network.', style: TextStyle(color: AppTheme.textSecondary)),
+                    const Gap(32),
+                    
+                    _buildStatusButton('Available', AppTheme.stable, Icons.check_circle_outline, () {
+                      ref.read(bedsProvider.notifier).updateBedStatus(bed.id, 'Available');
+                      Navigator.pop(context);
+                    }),
+                    const Gap(12),
+                    _buildStatusButton('Occupied', AppTheme.critical, Icons.do_not_disturb_on, () {
+                      ref.read(bedsProvider.notifier).updateBedStatus(bed.id, 'Occupied');
+                      Navigator.pop(context);
+                    }),
+                    const Gap(12),
+                    _buildStatusButton('Reserved', AppTheme.urgent, Icons.warning_amber_rounded, () {
+                      ref.read(bedsProvider.notifier).updateBedStatus(bed.id, 'Reserved');
+                      Navigator.pop(context);
+                    }),
+                    const Gap(24),
+                  ],
+                ),
+              ),
+            );
+          }
         );
       },
     );

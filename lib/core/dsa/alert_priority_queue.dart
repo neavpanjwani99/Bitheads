@@ -1,114 +1,93 @@
 import '../../models/alert_model.dart';
 
-/// Pure DSA Implementation: Min-Heap for Alert Priorities
+/// Min-Heap based priority queue for hospital alerts.
+/// This implementation ensures O(log n) insertion and O(log n) extraction.
+/// Priorities: CRITICAL (0), URGENT (1), STABLE (2).
 class AlertPriorityQueue {
   final List<AlertModel> _heap = [];
 
-  // Weights: CRITICAL=0, URGENT=1, STABLE=2
-  int _weight(String severity) {
-    switch (severity.toUpperCase()) {
-      case 'CRITICAL': return 0;
-      case 'URGENT': return 1;
-      case 'STABLE': return 2;
-      default: return 3;
-    }
-  }
-
-  bool _compare(AlertModel a, AlertModel b) {
-    int wA = _weight(a.severity);
-    int wB = _weight(b.severity);
-    if (wA != wB) {
-      return wA < wB; // Lower weight comes first
-    }
-    // If equal severity, older timestamp comes first (FIFO for same priority)
-    return a.createdAt.isBefore(b.createdAt);
-  }
-
+  /// Inserts an alert into the heap and maintains heap property (bubble up).
+  /// Time Complexity: O(log n)
   void insert(AlertModel alert) {
     _heap.add(alert);
-    _siftUp(_heap.length - 1);
+    _bubbleUp(_heap.length - 1);
   }
 
-  AlertModel? extract() {
-    if (_heap.isEmpty) return null;
-    if (_heap.length == 1) return _heap.removeLast();
-
-    AlertModel root = _heap[0];
-    _heap[0] = _heap.removeLast();
-    _siftDown(0);
-    return root;
-  }
-
-  AlertModel? peek() => _heap.isNotEmpty ? _heap.first : null;
-
-  void removeById(String id) {
-    int index = _heap.indexWhere((element) => element.id == id);
-    if (index == -1) return;
-
-    if (index == _heap.length - 1) {
-      _heap.removeLast();
-      return;
-    }
-
-    _heap[index] = _heap.removeLast();
-    _siftUp(index);
-    _siftDown(index);
-  }
-  
-  List<AlertModel> toList() {
-    // Return a sorted snapshot without mutating heap
-    // Warning: Sorting output here is O(N log N), but technically 
-    // real usage would pop out elements. For flutter UI binding, 
-    // we do an isolated cloned heap destructive drain to display natively correctly.
-    AlertPriorityQueue clone = AlertPriorityQueue();
-    clone._heap.addAll(_heap);
+  /// Extracts the highest priority alert (min value).
+  /// Time Complexity: O(log n)
+  AlertModel extractMin() {
+    if (_heap.isEmpty) throw Exception('Empty queue');
+    final min = _heap[0];
     
-    List<AlertModel> sortedList = [];
-    while (clone._heap.isNotEmpty) {
-      sortedList.add(clone.extract()!);
+    if (_heap.length == 1) {
+      _heap.removeLast();
+    } else {
+      _heap[0] = _heap.last;
+      _heap.removeLast();
+      _siftDown(0);
     }
-    return sortedList;
+    return min;
   }
 
-  void _siftUp(int k) {
-    while (k > 0) {
-      int parent = (k - 1) ~/ 2;
-      if (_compare(_heap[k], _heap[parent])) {
-        _swap(k, parent);
-        k = parent;
+  AlertModel peek() => _heap[0];
+  bool get isEmpty => _heap.isEmpty;
+  int get length => _heap.length;
+
+  /// Returns a sorted list of alerts based on priority.
+  /// Uses a copy to avoid destroying the heap structure.
+  /// Time Complexity: O(n log n)
+  List<AlertModel> get sorted {
+    // Standard sort for display, utilizing the priority logic
+    final copy = List<AlertModel>.from(_heap);
+    copy.sort((a, b) => _priority(a).compareTo(_priority(b)));
+    return copy;
+  }
+
+  /// Maps alert severity to numeric priority.
+  /// CRITICAL (0) is high priority (min in our min-heap).
+  int _priority(AlertModel a) {
+    if (a.severity == 'CRITICAL') return 0;
+    if (a.severity == 'URGENT') return 1;
+    return 2;
+  }
+
+  /// Restores heap property by moving a node up the tree.
+  void _bubbleUp(int i) {
+    while (i > 0) {
+      int parent = (i - 1) ~/ 2;
+      if (_priority(_heap[parent]) > _priority(_heap[i])) {
+        final tmp = _heap[parent];
+        _heap[parent] = _heap[i];
+        _heap[i] = tmp;
+        i = parent;
       } else {
         break;
       }
     }
   }
 
-  void _siftDown(int k) {
-    int n = _heap.length;
-    while (true) {
-      int left = 2 * k + 1;
-      int right = 2 * k + 2;
-      int smallest = k;
-
-      if (left < n && _compare(_heap[left], _heap[smallest])) {
-        smallest = left;
-      }
-      if (right < n && _compare(_heap[right], _heap[smallest])) {
-        smallest = right;
-      }
-      if (smallest != k) {
-        _swap(k, smallest);
-        k = smallest;
-      } else {
-        break;
-      }
-    }
-  }
-
-  void _swap(int i, int j) {
-    AlertModel temp = _heap[i];
-    _heap[i] = _heap[j];
-    _heap[j] = temp;
-  }
-  
   void clear() => _heap.clear();
+
+  List<AlertModel> toList() => sorted;
+
+  /// Restores heap property by moving a node down the tree.
+  void _siftDown(int i) {
+    int smallest = i;
+    int left = 2 * i + 1;
+    int right = 2 * i + 2;
+
+    if (left < _heap.length && _priority(_heap[left]) < _priority(_heap[smallest])) {
+      smallest = left;
+    }
+    if (right < _heap.length && _priority(_heap[right]) < _priority(_heap[smallest])) {
+      smallest = right;
+    }
+
+    if (smallest != i) {
+      final tmp = _heap[smallest];
+      _heap[smallest] = _heap[i];
+      _heap[i] = tmp;
+      _siftDown(smallest);
+    }
+  }
 }

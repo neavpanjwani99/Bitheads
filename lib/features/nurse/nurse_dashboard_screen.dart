@@ -7,7 +7,11 @@ import '../../app/theme.dart';
 import '../../mock/mock_data.dart';
 import '../../mock/concerns_provider.dart';
 import '../../mock/announcements_provider.dart';
-import '../../widgets/chatbot_overlay.dart';
+import '../../providers/session_provider.dart';
+import '../../providers/work_history_provider.dart';
+import '../../providers/resources_provider.dart';
+import '../../providers/clinical_status_providers.dart';
+import '../../widgets/mass_casualty_banner.dart';
 
 class NurseDashboardScreen extends ConsumerStatefulWidget {
   const NurseDashboardScreen({super.key});
@@ -36,19 +40,33 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
     setState(() {
       upcomingMeds[index]['given'] = true;
     });
+    ref.read(workHistoryProvider.notifier).addLogToCurrentShift('Administered Med: ${upcomingMeds[index]['med']} to ${upcomingMeds[index]['patient']}');
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Medication completed.')));
   }
 
   @override
   Widget build(BuildContext context) {
+    final massCasualty = ref.watch(massCasualtyProvider);
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Nursing Operations'),
-        actions: [IconButton(icon: const Icon(Icons.logout_outlined), onPressed: () => context.go('/login'))],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout_outlined), 
+            onPressed: () {
+              ref.read(sessionProvider.notifier).endSession();
+              context.go('/login');
+            }
+          )
+        ],
       ),
-      floatingActionButton: const ChatbotOverlay(),
-      body: _currentIndex == 0 ? _buildDashboardBody() : const Center(child: Text('Bed Tracker Module Placeholder')),
+      body: Column(
+        children: [
+          if (massCasualty) const MassCasualtyBanner(),
+          Expanded(child: _currentIndex == 0 ? _buildDashboardBody() : const Center(child: Text('Bed Tracker Module Placeholder'))),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (idx) {
@@ -116,6 +134,8 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
             const Gap(16),
           ],
 
+
+
           // CONCERNS SECTION
           if (allConcerns.isNotEmpty) ...[
             const Text('Help Requests', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
@@ -142,9 +162,15 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
                     const Gap(16),
                     Row(
                       children: [
-                        Expanded(child: OutlinedButton(onPressed: (){ ref.read(concernsProvider.notifier).updateStatus(c.id, 'Declined'); }, child: const Text('Decline', style: TextStyle(color: AppTheme.textSecondary)))),
+                        Expanded(child: OutlinedButton(onPressed: (){ 
+                          ref.read(concernsProvider.notifier).updateStatus(c.id, 'Declined', nurseId: currentUser.uid); 
+                          ref.read(workHistoryProvider.notifier).addLogToCurrentShift('Concern from ${c.doctorName} — ${c.type} — Declined — ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}');
+                        }, child: const Text('Decline', style: TextStyle(color: AppTheme.textSecondary)))),
                         const Gap(12),
-                        Expanded(child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: AppTheme.stable), onPressed: (){ ref.read(concernsProvider.notifier).updateStatus(c.id, 'Accepted'); }, child: const Text('Accept'))),
+                        Expanded(child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: AppTheme.stable), onPressed: (){ 
+                          ref.read(concernsProvider.notifier).updateStatus(c.id, 'Accepted', nurseId: currentUser.uid); 
+                          ref.read(workHistoryProvider.notifier).addLogToCurrentShift('Concern from ${c.doctorName} — ${c.type} — Accepted — ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}');
+                        }, child: const Text('Accept'))),
                       ],
                     )
                   ],
@@ -235,30 +261,68 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
   }
 
   Widget _buildWorkHistory() {
-    return ListView(
+    final history = ref.watch(workHistoryProvider);
+    
+    return ListView.builder(
       padding: const EdgeInsets.all(16),
-      children: [
-        _histItem('18 Apr', 'Shift: 08:00-16:00', '12 Patients • 6 Meds', '1 Tasks • 2m response'),
-        _histItem('17 Apr', 'Shift: 08:00-16:00', '10 Patients • 4 Meds', '4 Tasks • 1m50s response'),
-        _histItem('16 Apr', 'Shift: 08:00-16:00', '14 Patients • 8 Meds', '2 Tasks • 1m10s response'),
-        _histItem('15 Apr', 'Shift: 08:00-16:00', '9 Patients • 5 Meds', '3 Tasks • N/A'),
-        _histItem('14 Apr', 'Shift: 08:00-16:00', '12 Patients • 6 Meds', '5 Tasks • 45s response'),
-      ],
+      itemCount: history.length,
+      itemBuilder: (context, index) {
+        final h = history[index];
+        final title = index == 0 ? 'Today Shift' : '${h.date.day} Apr';
+        final stats = '${h.patientsCount} Patients • ${h.medicationsGiven} Meds';
+        
+        final List<Widget> children = [
+          _histItem(title, 'Shift: ${h.shift}', stats, '${h.logs.length} Tasks • ${h.avgResponseTime} response'),
+        ];
+        
+        if (index == 0 && h.logs.isNotEmpty) {
+          children.add(
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(8)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: h.logs.map((log) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.history, size: 12, color: AppTheme.primary),
+                      const Gap(6),
+                      Expanded(child: Text(log, style: const TextStyle(fontSize: 12))),
+                    ],
+                  ),
+                )).toList(),
+              ),
+            )
+          );
+        }
+        
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
+      },
     );
   }
 
   Widget _buildLoginHistory() {
-    return ListView(
+    final sessions = ref.watch(sessionProvider);
+    
+    return ListView.builder(
       padding: const EdgeInsets.all(16),
-      children: [
-        _histItem('Today, 07:45', 'Logout: --', 'Duration: Active', 'Device: Mobile (Android)'),
-        _histItem('17 Apr, 07:55', 'Logout: 16:05', 'Duration: 8h 10m', 'Device: Mobile (Android)'),
-        _histItem('16 Apr, 07:50', 'Logout: 16:15', 'Duration: 8h 25m', 'Device: Mobile (Android)'),
-        _histItem('15 Apr, 07:48', 'Logout: 16:00', 'Duration: 8h 12m', 'Device: Mobile (Android)'),
-        _histItem('14 Apr, 07:59', 'Logout: 16:05', 'Duration: 8h 06m', 'Device: Mobile (Android)'),
-        _histItem('13 Apr, 07:44', 'Logout: 16:00', 'Duration: 8h 16m', 'Device: Mobile (Android)'),
-        _histItem('12 Apr, 07:56', 'Logout: 16:20', 'Duration: 8h 24m', 'Device: Kiosk'),
-      ],
+      itemCount: sessions.length,
+      itemBuilder: (context, index) {
+        final session = sessions[index];
+        final isToday = session.loginTime.day == DateTime.now().day;
+        final dateStr = isToday ? 'Today, ' : '${session.loginTime.day} Apr, ';
+        final loginTimeStr = '${session.loginTime.hour.toString().padLeft(2,'0')}:${session.loginTime.minute.toString().padLeft(2,'0')}';
+        final logoutTimeStr = session.logoutTime == null ? '--' : '${session.logoutTime!.hour.toString().padLeft(2,'0')}:${session.logoutTime!.minute.toString().padLeft(2,'0')}';
+        
+        return _histItem(
+          '$dateStr$loginTimeStr', 
+          'Logout: $logoutTimeStr', 
+          'Duration: ${session.duration}', 
+          'Device: ${session.device}'
+        );
+      },
     );
   }
 
@@ -306,4 +370,7 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
       ),
     );
   }
+
+
 }
+

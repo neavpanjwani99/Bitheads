@@ -6,11 +6,13 @@ class ConcernModel {
   final String doctorName;
   final String patientId;
   final String patientName;
-  final String type; // Medication Check, Vitals Monitor, etc.
+  final String type; 
   final String description;
-  final String priority; // Normal, Urgent
+  final String priority; 
   final DateTime timeReceived;
-  String status; // Pending, Accepted, Declined
+  final String status; // Pending, Accepted, Declined, Completed
+  final DateTime? respondedAt;
+  final String? respondedByNurseId;
 
   ConcernModel({
     required this.id,
@@ -23,7 +25,30 @@ class ConcernModel {
     required this.priority,
     required this.timeReceived,
     this.status = 'Pending',
+    this.respondedAt,
+    this.respondedByNurseId,
   });
+
+  ConcernModel copyWith({
+    String? status,
+    DateTime? respondedAt,
+    String? respondedByNurseId,
+  }) {
+    return ConcernModel(
+      id: id,
+      doctorId: doctorId,
+      doctorName: doctorName,
+      patientId: patientId,
+      patientName: patientName,
+      type: type,
+      description: description,
+      priority: priority,
+      timeReceived: timeReceived,
+      status: status ?? this.status,
+      respondedAt: respondedAt ?? this.respondedAt,
+      respondedByNurseId: respondedByNurseId ?? this.respondedByNurseId,
+    );
+  }
 }
 
 class ConcernsNotifier extends Notifier<List<ConcernModel>> {
@@ -34,18 +59,21 @@ class ConcernsNotifier extends Notifier<List<ConcernModel>> {
     state = [concern, ...state];
   }
 
-  void updateStatus(String id, String newStatus) {
+  void updateStatus(String id, String newStatus, {String? nurseId}) {
     state = [
       for (final c in state)
         if (c.id == id)
-          ConcernModel(
-            id: c.id, doctorId: c.doctorId, doctorName: c.doctorName,
-            patientId: c.patientId, patientName: c.patientName, type: c.type,
-            description: c.description, priority: c.priority, timeReceived: c.timeReceived,
-            status: newStatus
+          c.copyWith(
+            status: newStatus,
+            respondedAt: DateTime.now(),
+            respondedByNurseId: nurseId,
           )
         else c,
     ];
+  }
+
+  void markCompleted(String id) {
+    updateStatus(id, 'Completed');
   }
 }
 

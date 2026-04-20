@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/dsa/alert_priority_queue.dart';
 import '../../app/theme.dart';
 import '../../mock/mock_data.dart';
 import 'widgets/alert_card.dart';
+import '../../models/alert_model.dart';
+import '../../providers/session_provider.dart';
 
 class AlertListScreen extends ConsumerStatefulWidget {
   const AlertListScreen({super.key});
@@ -17,12 +20,11 @@ class _AlertListScreenState extends ConsumerState<AlertListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // using alertsProvider fulfills requirement since it returns Min-Heap derived list
     final allAlerts = ref.watch(alertsProvider);
     
     // Auth role filtering (Mock)
     final currentUser = ref.watch(currentUserProvider);
-    List filteredAlerts = allAlerts;
+    List<AlertModel> filteredAlerts = allAlerts;
     if (currentUser?.role == 'Doctor') {
       filteredAlerts = allAlerts.where((a) => a.target == 'All Staff' || a.target == 'Doctors Only').toList();
     } else if (currentUser?.role == 'Nurse') {
@@ -33,6 +35,13 @@ class _AlertListScreenState extends ConsumerState<AlertListScreen> {
     if (selectedFilter != 'All') {
       filteredAlerts = filteredAlerts.where((a) => a.severity == selectedFilter.toUpperCase()).toList();
     }
+
+    // DSA INTEGRATION: Use Min-Heap based Priority Queue for sorting
+    final pq = AlertPriorityQueue();
+    for (final a in filteredAlerts) {
+      pq.insert(a);
+    }
+    final sortedAlerts = pq.sorted;
 
     return Scaffold(
       appBar: AppBar(
@@ -58,12 +67,12 @@ class _AlertListScreenState extends ConsumerState<AlertListScreen> {
             ),
           ),
           Expanded(
-            child: filteredAlerts.isEmpty 
+            child: sortedAlerts.isEmpty 
               ? const Center(child: Text('No active alerts.'))
               : ListView.builder(
-                  itemCount: filteredAlerts.length,
+                  itemCount: sortedAlerts.length,
                   itemBuilder: (context, index) {
-                    final alert = filteredAlerts[index];
+                    final alert = sortedAlerts[index];
                     return Dismissible(
                       key: Key(alert.id),
                       direction: DismissDirection.endToStart,

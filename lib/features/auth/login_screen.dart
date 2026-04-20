@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
 import '../../app/theme.dart';
 import '../../mock/mock_data.dart';
+import '../../providers/session_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -59,6 +60,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final staff = ref.read(staffProvider);
     final user = staff.firstWhere((s) => s.role == selectedRole, orElse: () => staff.first);
     ref.read(currentUserProvider.notifier).setUser(user);
+    ref.read(sessionProvider.notifier).startSession(selectedRole);
 
     if (selectedRole == 'Admin') context.go('/admin');
     else if (selectedRole == 'Doctor') context.go('/doctor');

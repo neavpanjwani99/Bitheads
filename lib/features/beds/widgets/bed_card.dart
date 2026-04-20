@@ -50,16 +50,18 @@ class BedCard extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(bed.id, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: statusColor, letterSpacing: -1)),
-              const Gap(8),
+              const Gap(4),
               if (bed.status == 'Occupied')
-                // Grab an example patient assignment. Mock logic finds first patient on this bed.
-                Text(
-                  ref.read(patientsProvider).firstWhere((p) => p.assignedBedId == bed.id, orElse: () => bed.type == 'ICU' ? ref.read(patientsProvider).first : ref.read(patientsProvider).last).name.split(' ')[0],
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
+                Flexible(
+                  child: Text(
+                    ref.read(patientsProvider).firstWhere((p) => p.assignedBedId == bed.id, orElse: () => bed.type == 'ICU' ? ref.read(patientsProvider).first : ref.read(patientsProvider).last).name.split(' ')[0],
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
                 )
               else
-                Icon(Icons.bed, color: statusColor, size: 36),
+                Flexible(child: Icon(Icons.bed, color: statusColor, size: 36)),
               const Gap(4),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -72,8 +74,8 @@ class BedCard extends ConsumerWidget {
                   style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                 ),
               ),
-              const Spacer(),
-              Text(helperText, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontStyle: FontStyle.italic)),
+              const Gap(4),
+              Text(helperText, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis),
             ],
           ),
         ),

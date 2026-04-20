@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme.dart';
 import '../../mock/mock_data.dart';
 import '../../widgets/role_avatar.dart';
+import '../../models/staff_model.dart';
+import '../../core/dsa/staff_sorter.dart';
 
 class StaffListScreen extends ConsumerStatefulWidget {
   const StaffListScreen({super.key});
@@ -17,6 +19,13 @@ class _StaffListScreenState extends ConsumerState<StaffListScreen> {
   @override
   Widget build(BuildContext context) {
     var allStaff = ref.watch(staffProvider);
+    
+    // DSA INTEGRATION: Use stable Merge Sort for staff availability sorting
+    allStaff = StaffSorter.mergeSort(List<StaffModel>.from(allStaff), (a, b) {
+      if (a.available && !b.available) return -1;
+      if (!a.available && b.available) return 1;
+      return a.name.compareTo(b.name);
+    });
     
     if (selectedFilter == 'Available') {
       allStaff = allStaff.where((s) => s.available).toList();

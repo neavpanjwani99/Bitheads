@@ -33,7 +33,7 @@ class _AlertCardState extends State<AlertCard> {
     final diff = DateTime.now().difference(widget.alert.createdAt);
     
     setState(() {
-      _activeTime = '${diff.inMinutes}m ${diff.inSeconds % 60}s';
+      _activeTime = '${diff.inMinutes}:${(diff.inSeconds % 60).toString().padLeft(2, '0')}';
       if (diff.inMinutes >= 2 && widget.alert.status == 'Active') {
         _escalating = true;
       } else {
@@ -97,9 +97,9 @@ class _AlertCardState extends State<AlertCard> {
               const Gap(12),
               Row(
                 children: [
-                   const Icon(Icons.timer, size: 14, color: AppTheme.textSecondary),
+                   const Icon(Icons.timer_outlined, size: 14, color: AppTheme.critical),
                    const Gap(4),
-                   Text('Active for $_activeTime', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold)),
+                   Text(_activeTime, style: const TextStyle(color: AppTheme.critical, fontSize: 13, fontWeight: FontWeight.w900, fontFamily: 'monospace')),
                    const Spacer(),
                    if (widget.alert.status == 'Acknowledged')
                      Row(

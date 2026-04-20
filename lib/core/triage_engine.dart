@@ -68,4 +68,48 @@ class TriageEngine {
     }
     return 'normal';
   }
+
+  static int calculateRiskScore({
+    required String triageLevel,
+    required int age,
+    required int heartRate,
+    required double temperature,
+    required int systolicBp,
+    required DateTime lastVitalsTime,
+  }) {
+    int score = 0;
+
+    // Triage base score
+    if (triageLevel == 'CRITICAL') score += 40;
+    else if (triageLevel == 'URGENT') score += 25;
+    else score += 5;
+
+    // Age risk
+    if (age > 70) score += 20;
+    else if (age > 55) score += 10;
+    else if (age < 5) score += 15;
+
+    // Vitals deviation
+    if (systolicBp < 90 || systolicBp > 180) 
+      score += 15;
+    else if (systolicBp < 100 || systolicBp > 160) 
+      score += 8;
+
+    if (heartRate > 130 || heartRate < 40) 
+      score += 15;
+    else if (heartRate > 110 || heartRate < 55) 
+      score += 8;
+
+    if (temperature > 40 || temperature < 35) 
+      score += 10;
+    else if (temperature > 39 || temperature < 36) 
+      score += 5;
+
+    // Time since last vitals check
+    int mins = DateTime.now().difference(lastVitalsTime).inMinutes;
+    if (mins > 60) score += 10;
+    else if (mins > 30) score += 5;
+
+    return score.clamp(0, 100);
+  }
 }

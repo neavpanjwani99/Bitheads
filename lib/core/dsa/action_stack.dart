@@ -1,47 +1,42 @@
-import 'dart:collection';
+import 'package:flutter/foundation.dart';
 
-/// Generic representation of an action that can be undone
-class AdminAction {
+/// Entry in the action stack tracking what happened and how to revert it.
+class ActionEntry {
   final String description;
   final DateTime timestamp;
-  final Function undoCallback;
+  final VoidCallback undoAction;
 
-  AdminAction({
-    required this.description, 
-    required this.timestamp, 
-    required this.undoCallback
+  ActionEntry({
+    required this.description,
+    required this.timestamp,
+    required this.undoAction,
   });
 }
 
-/// Pure DSA Implementation: LIFO Stack for Crisis Log & Undo
+/// LIFO (Last-In, First-Out) Stack implementation for 'Undo' functionality.
+/// Maintains a maximum size of 10 to manage memory.
 class ActionStack {
-  final Queue<AdminAction> _stack = ListQueue<AdminAction>();
+  final List<ActionEntry> _stack = [];
+  static const int maxSize = 10;
 
-  void push(AdminAction action) {
-    _stack.addLast(action);
-  }
-
-  AdminAction? pop() {
-    if (_stack.isEmpty) return null;
-    return _stack.removeLast();
-  }
-
-  AdminAction? peek() {
-    if (_stack.isEmpty) return null;
-    return _stack.last;
-  }
-  
-  bool get isEmpty => _stack.isEmpty;
-  
-  void undoLastAction() {
-    AdminAction? last = pop();
-    if (last != null) {
-      last.undoCallback();
+  /// Pushes a new action onto the stack.
+  /// O(1)
+  void push(ActionEntry entry) {
+    _stack.add(entry);
+    if (_stack.length > maxSize) {
+      _stack.removeAt(0);
     }
   }
 
-  List<AdminAction> getHistory() {
-    // Return history reversed (newest first)
-    return _stack.toList().reversed.toList();
-  }
+  /// Returns and removes the last action performed.
+  /// O(1)
+  ActionEntry? pop() => _stack.isEmpty ? null : _stack.removeLast();
+
+  ActionEntry? peek() => _stack.isEmpty ? null : _stack.last;
+
+  /// Returns the most recent 5 actions for display in the Crisis Log.
+  List<ActionEntry> get last5 => _stack.reversed.take(5).toList();
+
+  bool get isEmpty => _stack.isEmpty;
+  int get length => _stack.length;
 }

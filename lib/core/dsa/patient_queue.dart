@@ -1,36 +1,34 @@
-import '../../models/patient_model.dart';
-import 'dart:collection';
+/// Standard FIFO (First-In, First-Out) Queue implementation.
+/// Used for tracking the order of incoming patients for triage.
+class PatientQueue<T> {
+  final List<T> _items = [];
 
-/// Pure DSA Implementation: FIFO Queue for Incoming Patients
-class PatientQueue {
-  final Queue<PatientModel> _queue = ListQueue<PatientModel>();
-
-  void enqueue(PatientModel patient) {
-    _queue.addLast(patient);
-  }
-
-  PatientModel? dequeue() {
-    if (_queue.isEmpty) return null;
-    return _queue.removeFirst();
-  }
-
-  PatientModel? peek() {
-    if (_queue.isEmpty) return null;
-    return _queue.first;
+  /// Adds a patient to the end of the queue.
+  /// O(1)
+  void enqueue(T item) => _items.add(item);
+  
+  /// Removes and returns the first patient in the queue.
+  /// O(n) due to list shifting, suitable for expected hospital queue sizes.
+  T dequeue() {
+    if (isEmpty) throw Exception('Queue empty');
+    return _items.removeAt(0);
   }
   
-  bool get isEmpty => _queue.isEmpty;
-  
-  int get length => _queue.length;
+  /// Returns the first patient without removing them.
+  T peek() => _items.first;
 
-  int positionOf(String id) {
-    int pos = 1;
-    for (var p in _queue) {
-      if (p.id == id) return pos;
-      pos++;
-    }
-    return -1;
-  }
+  bool get isEmpty => _items.isEmpty;
+  int get length => _items.length;
   
-  List<PatientModel> toList() => _queue.toList();
+  /// Returns the 1-based position of a specific patient in the queue.
+  int positionOf(T item) => _items.indexOf(item) + 1;
+  
+  /// Returns a copy of the items in the queue.
+  List<T> toList() => List<T>.from(_items);
+
+  /// Clears the queue.
+  void clear() => _items.clear();
+
+  /// Returns a read-only list of all items in the queue.
+  List<T> get allItems => List.unmodifiable(_items);
 }
