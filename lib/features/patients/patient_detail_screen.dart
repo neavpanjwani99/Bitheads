@@ -4,12 +4,17 @@ import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../app/theme.dart';
 import '../../mock/mock_data.dart';
 import '../../models/patient_model.dart';
+import '../../models/clinical_request_model.dart';
+import '../../providers/auth_provider.dart';
 import '../../mock/concerns_provider.dart';
 import '../../services/gemini_service.dart';
 import '../../providers/clinical_status_providers.dart';
+import '../../providers/firestore_providers.dart';
+import '../../services/firestore_service.dart';
 import 'widgets/ai_clinical_analysis_screen.dart';
 
 class PatientDetailScreen extends ConsumerStatefulWidget {
@@ -49,12 +54,12 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
             SizedBox(
               width: double.infinity, height: 50,
               child: ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   if (noteText.isNotEmpty) {
                     final newNote = 'Note — ${DateFormat('HH:mm').format(DateTime.now())}: $noteText';
                     final updated = patient.copyWith(notes: [...patient.notes, newNote]);
-                    ref.read(patientsProvider.notifier).updatePatient(updated);
-                    Navigator.pop(c);
+                    await ref.read(firestoreServiceProvider).updatePatient(updated);
+                    if (c.mounted) Navigator.pop(c);
                   }
                 }, 
                 child: const Text('Save Note')
@@ -89,16 +94,29 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
               width: double.infinity, height: 50,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: AppTheme.urgent),
-                onPressed: () {
-                  if (orderText.isNotEmpty) {
-                    final newOrder = 'Order: $orderText (${DateFormat('HH:mm').format(DateTime.now())})';
+                onPressed: () async {
+                    final user = ref.read(authNotifierProvider);
+                    final newRequest = ClinicalRequestModel(
+                      id: '',
+                      patientId: patient.id,
+                      patientName: patient.name,
+                      doctorId: user?.uid ?? '',
+                      doctorName: user?.name ?? 'Doctor',
+                      type: 'ORDER',
+                      description: orderText,
+                      status: 'PENDING',
+                      priority: 'NORMAL',
+                      createdAt: DateTime.now(),
+                    );
+                    
+                    await ref.read(firestoreServiceProvider).addClinicalRequest(newRequest);
+                    
                     final updated = patient.copyWith(
-                      orders: [...patient.orders, newOrder],
+                      orders: [...patient.orders, 'Order: $orderText (${DateFormat('HH:mm').format(DateTime.now())})'],
                       events: [...patient.events, {'type': 'ORDER', 'time': DateTime.now(), 'msg': 'Ordered: $orderText'}]
                     );
-                    ref.read(patientsProvider.notifier).updatePatient(updated);
-                    Navigator.pop(c);
-                  }
+                    await ref.read(firestoreServiceProvider).updatePatientFields(patient.id, updated.toMap());
+                    if (c.mounted) Navigator.pop(c);
                 }, 
                 child: const Text('Issue Order')
               )
@@ -227,18 +245,28 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
                 ],
               ),
               const Gap(24),
-              SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: (){
+              SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: () async {
                 if(desc.isNotEmpty) {
-                  final curr = ref.read(currentUserProvider);
-                  ref.read(concernsProvider.notifier).addConcern(ConcernModel(
-                    id: 'C${DateTime.now().millisecondsSinceEpoch}',
-                    doctorId: curr!.uid, doctorName: curr.name,
-                    patientId: patient.id, patientName: patient.name,
-                    type: typ, description: desc, priority: pty,
-                    timeReceived: DateTime.now()
-                  ));
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Concern dispatched to Nursing.')));
+                  final user = ref.read(authNotifierProvider);
+                  final newRequest = ClinicalRequestModel(
+                    id: '',
+                    patientId: patient.id,
+                    patientName: patient.name,
+                    doctorId: user?.uid ?? '',
+                    doctorName: user?.name ?? 'Doctor',
+                    type: 'CONCERN',
+                    description: desc,
+                    status: 'PENDING',
+                    priority: pty.toUpperCase(),
+                    createdAt: DateTime.now(),
+                  );
+                  
+                  await ref.read(firestoreServiceProvider).addClinicalRequest(newRequest);
+                  
+                  if (c.mounted) {
+                    Navigator.pop(c);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Concern dispatched to Nursing.')));
+                  }
                 }
               }, child: const Text('Submit Concern'))),
               const Gap(32),
@@ -251,17 +279,20 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
 
   @override
   Widget build(BuildContext context) {
-    final patients = ref.watch(patientsProvider);
-    final patient = patients.firstWhere((p) => p.id == widget.patientId, orElse: () => patients.first);
-    
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Patient Details')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+    return ref.watch(realPatientsProvider).when(
+      loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+      error: (e, s) => Scaffold(body: Center(child: Text('Error: $e'))),
+      data: (patients) {
+        final patient = patients.firstWhere((p) => p.id == widget.patientId, orElse: () => patients.first);
+        
+        return Scaffold(
+          backgroundColor: AppTheme.background,
+          appBar: AppBar(title: const Text('Patient Details')),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
             // Head card
             Card(
               child: Padding(
@@ -321,36 +352,7 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
             ),
             const Gap(16),
 
-            if (patient.attendanceStatus == 'Pending') ...[
-              Row(
-                children: [
-                   Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.divider)),
-                      onPressed: () {
-                         final updated = patient.copyWith(attendanceStatus: 'Not_Attended');
-                         ref.read(patientsProvider.notifier).updatePatient(updated);
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as Not Attended.')));
-                      },
-                      child: const Text('Not Attended', style: TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.bold)),
-                    )
-                  ),
-                  const Gap(16),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.stable, padding: const EdgeInsets.symmetric(vertical: 16)),
-                      onPressed: () {
-                         final updated = patient.copyWith(attendanceStatus: 'Attended');
-                         ref.read(patientsProvider.notifier).updatePatient(updated);
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Patient Encounter Complete.')));
-                      },
-                      child: const Text('Mark Attended'),
-                    )
-                  ),
-                ],
-              ),
-              const Gap(32),
-            ],
+            const Gap(16),
 
             const Gap(16),
             SizedBox(
@@ -424,12 +426,57 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
                 ),
               )),
               
+            if (patient.attendanceStatus == 'Pending') ...[
+              const Gap(32),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.stable,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () async {
+                    await ref.read(firestoreServiceProvider).updatePatientFields(patient.id, {
+                      'attendanceStatus': 'Attended',
+                      'nextVitalsTime': null, // Clear scheduling
+                    });
+                    
+                    // FREE THE BED
+                    if (patient.assignedBedId != null) {
+                      await ref.read(firestoreServiceProvider).updateBedStatus(
+                        patient.assignedBedId!, 
+                        'Available',
+                        patientId: null,
+                        patientName: null,
+                      );
+                    }
+
+                    if (context.mounted) {
+                      context.pop();
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Patient care completed and archived. Bed is now available.')));
+                    }
+                  },
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle_outline),
+                      Gap(12),
+                      Text('Mark Care as Completed', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const Gap(100),
           ],
         ),
       ),
     );
-  }
+  },
+);
+}
 
   Widget _buildTimeline(PatientModel p) {
     // Combine notes, triage (start), and events
@@ -437,6 +484,14 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
       {'type': 'TRIAGE', 'time': p.lastVitalsTime ?? DateTime.now().subtract(const Duration(hours: 4)), 'msg': 'Patient admitted via triage.'},
       ...p.events,
     ];
+    
+    // Fix Timestamp conversion for events from Firestore
+    for (var item in items) {
+      if (item['time'] is Timestamp) {
+        item['time'] = (item['time'] as Timestamp).toDate();
+      }
+    }
+
     items.sort((a,b) => (b['time'] as DateTime).compareTo(a['time'] as DateTime));
 
     if (items.isEmpty) return const Text('Timeline empty.', style: TextStyle(color: AppTheme.textSecondary));
@@ -524,42 +579,45 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
   }
 
   Widget _buildPatientConcernStatus(String patientId) {
-    final concerns = ref.watch(concernsProvider).where((c) => c.patientId == patientId && c.status != 'Completed').toList();
-    if (concerns.isEmpty) return const SizedBox.shrink();
+    final clinicalReqsAsync = ref.watch(realClinicalRequestsProvider);
+    return clinicalReqsAsync.when(
+      data: (allReqs) {
+        final reqs = allReqs.where((r) => r.patientId == patientId && r.status == 'PENDING').toList();
+        if (reqs.isEmpty) return const SizedBox.shrink();
 
-    final c = concerns.first;
-    Color statusColor = c.status == 'Pending' ? AppTheme.urgent : AppTheme.stable;
+        final r = reqs.first;
+        Color statusColor = r.type == 'ORDER' ? AppTheme.urgent : AppTheme.critical;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: statusColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: statusColor.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline, color: statusColor, size: 18),
-          const Gap(12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Active Request: ${c.type}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: statusColor)),
-                Text(
-                  c.status == 'Pending' ? 'Waiting for Nursing...' : 'Nurse ${c.respondedByNurseId ?? ""} is responding',
-                  style: TextStyle(fontSize: 12, color: statusColor.withValues(alpha: 0.8)),
-                ),
-              ],
-            ),
+        return Container(
+          padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.only(bottom: 24),
+          decoration: BoxDecoration(
+            color: statusColor.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: statusColor.withValues(alpha: 0.3)),
           ),
-          if (c.status == 'Accepted')
-            TextButton(
-              onPressed: () => ref.read(concernsProvider.notifier).markCompleted(c.id),
-              child: const Text('Complete'),
-            ),
-        ],
-      ),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, color: statusColor, size: 18),
+              const Gap(12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Active Request: ${r.type}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: statusColor)),
+                    Text(
+                      'Waiting for Nursing to complete: "${r.description}"',
+                      style: TextStyle(fontSize: 12, color: statusColor.withValues(alpha: 0.8)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (e, s) => const SizedBox.shrink(),
     );
   }
 

@@ -6,17 +6,17 @@ import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../app/theme.dart';
-import '../../mock/mock_data.dart';
-import '../../mock/concerns_provider.dart';
-import '../../mock/announcements_provider.dart';
 import '../../models/patient_model.dart';
 import '../../models/alert_model.dart';
-import '../../providers/incoming_patients_provider.dart';
+import '../../models/bed_model.dart';
+import '../../models/staff_model.dart';
+import '../../providers/firestore_providers.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/clinical_status_providers.dart';
-import '../../providers/resources_provider.dart';
-import '../../core/dsa/action_stack.dart';
+import '../../providers/incoming_patients_provider.dart';
+import '../../services/firestore_service.dart';
 import '../../widgets/mass_casualty_banner.dart';
-import '../alerts/widgets/alert_card.dart';
+import '../../core/dsa/action_stack.dart';
 
 class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -50,15 +50,19 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    bool massCasualty = ref.watch(massCasualtyProvider);
-    ref.watch(incomingPatientsTimerProvider);
+    final massCasualty = ref.watch(massCasualtyProvider);
+    final patientsAsync = ref.watch(realPatientsProvider);
+    final staffAsync = ref.watch(realStaffProvider);
+    final bedsAsync = ref.watch(realBedsProvider);
+    final alertsAsync = ref.watch(realAlertsProvider);
+    final currentUser = ref.watch(authNotifierProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: CustomScrollView(
         slivers: [
-          _buildHeader(massCasualty),
-          if (massCasualty) _buildMassCasualtyBanner(),
+          _buildHeader(massCasualty, currentUser),
+          if (massCasualty) const SliverToBoxAdapter(child: MassCasualtyBanner()),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -66,19 +70,15 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _buildMassCasualtyToggle(massCasualty),
-                  
                   const Gap(24),
-                  _buildGraphsGrid(),
+                  _buildGraphsGrid(patientsAsync, bedsAsync, staffAsync, alertsAsync),
                   const Gap(32),
-
                   if (massCasualty) ...[
-                    _buildDischargeSuggestions(),
+                    _buildDischargeSuggestions(patientsAsync),
                     const Gap(32),
                   ],
-
-                  _buildPatientQueueSection(),
+                  _buildPatientQueueSection(patientsAsync),
                   const Gap(32),
-
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -109,7 +109,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildHeader(bool massCasualty) {
+  Widget _buildHeader(bool massCasualty, StaffModel? user) {
     return SliverAppBar(
       expandedHeight: 140,
       pinned: true,
@@ -140,7 +140,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                   const Gap(4),
                   Text(_currentTime, style: const TextStyle(color: Colors.white70, fontSize: 14)),
                   const Gap(16),
-                  const Text('City General Hospital | HOSP-ADM-001', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  Text('City General Hospital | ${user?.hospitalId ?? 'HOSP-ADM-001'}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
                 ],
               ),
             ),
@@ -148,36 +148,25 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         ),
       ),
       actions: [IconButton(icon: const Icon(Icons.logout_outlined, color: Colors.white), onPressed: () => context.go('/login'))],
-      bottom: massCasualty ? PreferredSize(
-        preferredSize: const Size.fromHeight(40),
-        child: Container(
-          color: AppTheme.critical, width: double.infinity, height: 40, alignment: Alignment.center,
-          child: const Text('MASS CASUALTY MODE ACTIVE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        ),
-      ) : null,
     );
   }
 
   Widget _buildMassCasualtyToggle(bool active) {
-    return Column(
-      children: [
-        InkWell(
-          onTap: () => _handleMassCasualtyMode(active),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            decoration: BoxDecoration(
-              color: active ? AppTheme.divider : AppTheme.critical, 
-              borderRadius: BorderRadius.circular(12),
-              border: active ? Border.all(color: AppTheme.textSecondary) : null,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              active ? 'DEACTIVATE MASS CASUALTY MODE' : 'ACTIVATE MASS CASUALTY MODE', 
-              style: TextStyle(color: active ? AppTheme.textPrimary : Colors.white, fontSize: 16, fontWeight: FontWeight.w600)
-            ),
-          ),
+    return InkWell(
+      onTap: () => _handleMassCasualtyMode(active),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: active ? AppTheme.divider : AppTheme.critical, 
+          borderRadius: BorderRadius.circular(12),
+          border: active ? Border.all(color: AppTheme.textSecondary) : null,
         ),
-      ],
+        alignment: Alignment.center,
+        child: Text(
+          active ? 'DEACTIVATE MASS CASUALTY MODE' : 'ACTIVATE MASS CASUALTY MODE', 
+          style: TextStyle(color: active ? AppTheme.textPrimary : Colors.white, fontSize: 16, fontWeight: FontWeight.w600)
+        ),
+      ),
     );
   }
 
@@ -192,13 +181,12 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               if (currentActive) {
                 ref.read(massCasualtyProvider.notifier).deactivate();
               } else {
                 ref.read(massCasualtyProvider.notifier).activate();
-                // Broadcast Alert
-                ref.read(alertsProvider.notifier).addAlert(AlertModel(
+                final alert = AlertModel(
                   id: 'MCE${DateTime.now().millisecondsSinceEpoch}',
                   type: 'MASS CASUALTY EVENT',
                   target: 'All Staff',
@@ -206,7 +194,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                   severity: 'CRITICAL',
                   status: 'Active',
                   createdAt: DateTime.now(),
-                ));
+                );
+                await ref.read(firestoreServiceProvider).addAlert(alert);
               }
               Navigator.pop(ctx);
             },
@@ -218,45 +207,49 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildMassCasualtyBanner() {
-    return const SliverToBoxAdapter(
-      child: MassCasualtyBanner(),
-    );
-  }
-
-  Widget _buildDischargeSuggestions() {
-    final patients = ref.watch(patientsProvider);
-    final dischargeCandidates = patients.where((p) => p.triageLevel == 'STABLE' && p.attendanceStatus == 'Attended').toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Consider Discharge to Free Beds', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.critical)),
-        const Gap(8),
-        if (dischargeCandidates.isEmpty)
-          const Text('No stable candidates for discharge found.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))
-        else
-          ...dischargeCandidates.take(3).map((p) => Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('Bed: ${p.assignedBedId} • Risk: ${p.riskScore}'),
-              trailing: ElevatedButton(
-                onPressed: () {
-                  // Discharge logic: set status to 'Discharged' or remove patient
-                  ref.read(patientsProvider.notifier).updatePatient(p.copyWith(attendanceStatus: 'Discharged'));
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${p.name} recommended for discharge.')));
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.stable, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-                child: const Text('Discharge', style: TextStyle(fontSize: 12)),
+  Widget _buildDischargeSuggestions(AsyncValue<List<PatientModel>> patientsAsync) {
+    return patientsAsync.when(
+      data: (patients) {
+        final dischargeCandidates = patients.where((p) => p.triageLevel == 'STABLE' && p.attendanceStatus == 'Attended').toList();
+        if (dischargeCandidates.isEmpty) return const SizedBox.shrink();
+        
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Consider Discharge to Free Beds', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.critical)),
+            const Gap(8),
+            ...dischargeCandidates.take(3).map((p) => Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('Bed: ${p.assignedBedId} • Status: Stable'),
+                trailing: ElevatedButton(
+                  onPressed: () async {
+                    await ref.read(firestoreServiceProvider).updatePatientFields(p.id, {'attendanceStatus': 'Discharged'});
+                    if (p.assignedBedId != null) {
+                      await ref.read(firestoreServiceProvider).updateBedStatus(p.assignedBedId!, 'Available');
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${p.name} recommended for discharge.')));
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.stable),
+                  child: const Text('Discharge', style: TextStyle(fontSize: 12)),
+                ),
               ),
-            ),
-          )),
-      ],
+            )),
+          ],
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (e, _) => const SizedBox.shrink(),
     );
   }
 
-  Widget _buildGraphsGrid() {
+  Widget _buildGraphsGrid(
+    AsyncValue<List<PatientModel>> patients, 
+    AsyncValue<List<BedModel>> beds,
+    AsyncValue<List<StaffModel>> staff,
+    AsyncValue<List<AlertModel>> alerts
+  ) {
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
@@ -265,10 +258,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       mainAxisSpacing: 16,
       childAspectRatio: 0.85,
       children: [
-        _buildGraphCard('Bed Occupancy', _buildBedChart()),
-        _buildGraphCard('Alert Distribution', _buildAlertChart()),
-        _buildGraphCard('Staff Availability', _buildStaffChart()),
-        _buildGraphCard('Patient Triage', _buildTriageChart()),
+        _buildGraphCard('Bed Occupancy', _buildBedChart(beds)),
+        _buildGraphCard('Alert Distribution', _buildAlertChart(alerts)),
+        _buildGraphCard('Staff Availability', _buildStaffChart(staff)),
+        _buildGraphCard('Patient Triage', _buildTriageChart(patients)),
       ],
     );
   }
@@ -289,196 +282,125 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildBedChart() {
-    final beds = ref.watch(bedsProvider);
-    double icuT = beds.where((b)=>b.type=='ICU').length.toDouble();
-    double icuO = beds.where((b)=>b.type=='ICU' && b.status!='Available').length.toDouble();
-    double genT = beds.where((b)=>b.type=='General').length.toDouble();
-    double genO = beds.where((b)=>b.type=='General' && b.status!='Available').length.toDouble();
-    double emrT = beds.where((b)=>b.type=='Emergency').length.toDouble();
-    double emrO = beds.where((b)=>b.type=='Emergency' && b.status!='Available').length.toDouble();
+  Widget _buildBedChart(AsyncValue<List<BedModel>> bedsAsync) {
+    return bedsAsync.when(
+      data: (beds) {
+        double icuT = beds.where((b)=>b.type=='ICU').length.toDouble();
+        double icuO = beds.where((b)=>b.type=='ICU' && b.status!='Available').length.toDouble();
+        double genT = beds.where((b)=>b.type=='General').length.toDouble();
+        double genO = beds.where((b)=>b.type=='General' && b.status!='Available').length.toDouble();
+        double emrT = beds.where((b)=>b.type=='Emergency').length.toDouble();
+        double emrO = beds.where((b)=>b.type=='Emergency' && b.status!='Available').length.toDouble();
 
-    return BarChart(
-      BarChartData(
-        alignment: BarChartAlignment.spaceEvenly,
-        maxY: 20,
-        barTouchData: BarTouchData(
-          enabled: true,
-          touchTooltipData: BarTouchTooltipData(getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem('${rod.toY.round()}', const TextStyle(color: Colors.white))),
-          touchCallback: (event, response) {
-            if (event is FlTapUpEvent && response?.spot != null) {
-              _showHistoryDetail('Beds');
-            }
-          },
-        ),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['ICU','GEN','EMR'][v.toInt()], style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)))
+        return BarChart(BarChartData(
+          alignment: BarChartAlignment.spaceEvenly,
+          maxY: (icuT + genT + emrT) > 0 ? (icuT + genT + emrT) : 10,
+          titlesData: FlTitlesData(
+            topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
+            bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['ICU','GEN','EMR'][v.toInt()], style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)))),
           ),
-        ),
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        barGroups: [
-          BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: icuT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: icuO, color: AppTheme.primary, width: 12)]),
-          BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: genT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: genO, color: AppTheme.primary, width: 12)]),
-          BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: emrT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: emrO, color: AppTheme.primary, width: 12)]),
-        ]
-      ),
-      swapAnimationDuration: const Duration(milliseconds: 300),
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          barGroups: [
+            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: icuT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: icuO, color: AppTheme.primary, width: 12)]),
+            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: genT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: genO, color: AppTheme.primary, width: 12)]),
+            BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: emrT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: emrO, color: AppTheme.primary, width: 12)]),
+          ]
+        ));
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => const Icon(Icons.error),
     );
   }
 
-  Widget _buildAlertChart() {
-    final alerts = ref.watch(alertsProvider);
-    double c = alerts.where((a)=>a.severity=='CRITICAL').length.toDouble();
-    double u = alerts.where((a)=>a.severity=='URGENT').length.toDouble();
-    double s = alerts.where((a)=>a.severity=='STABLE').length.toDouble();
-    double r = alerts.where((a)=>a.status=='Resolved').length.toDouble();
+  Widget _buildAlertChart(AsyncValue<List<AlertModel>> alertsAsync) {
+    return alertsAsync.when(
+      data: (alerts) {
+        double c = alerts.where((a)=>a.severity=='CRITICAL' && a.status != 'Resolved').length.toDouble();
+        double u = alerts.where((a)=>a.severity=='URGENT' && a.status != 'Resolved').length.toDouble();
+        double s = alerts.where((a)=>a.severity=='STABLE' && a.status != 'Resolved').length.toDouble();
+        double r = alerts.where((a)=>a.status=='Resolved').length.toDouble();
 
-    return BarChart(
-      BarChartData(
-        alignment: BarChartAlignment.spaceEvenly,
-        maxY: 10,
-        barTouchData: BarTouchData(
-          enabled: true,
-          touchTooltipData: BarTouchTooltipData(getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem('${rod.toY.round()}', const TextStyle(color: Colors.white))),
-          touchCallback: (event, response) {
-            if (event is FlTapUpEvent && response?.spot != null) _showHistoryDetail('Alerts');
-          },
-        ),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['CRI','URG','STB','RES'][v.toInt()], style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary)))
+        return BarChart(BarChartData(
+          alignment: BarChartAlignment.spaceEvenly,
+          maxY: (c+u+s+r) > 0 ? (c+u+s+r) : 10,
+          titlesData: FlTitlesData(
+            topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
+            bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['CRI','URG','STB','RES'][v.toInt()], style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary)))),
           ),
-        ),
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        barGroups: [
-          BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: c, color: AppTheme.critical, width: 16)]),
-          BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: u, color: AppTheme.urgent, width: 16)]),
-          BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: s, color: AppTheme.stable, width: 16)]),
-          BarChartGroupData(x: 3, barRods: [BarChartRodData(toY: r, color: AppTheme.textSecondary, width: 16)]),
-        ]
-      ),
-      swapAnimationDuration: const Duration(milliseconds: 300),
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          barGroups: [
+            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: c, color: AppTheme.critical, width: 16)]),
+            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: u, color: AppTheme.urgent, width: 16)]),
+            BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: s, color: AppTheme.stable, width: 16)]),
+            BarChartGroupData(x: 3, barRods: [BarChartRodData(toY: r, color: AppTheme.textSecondary, width: 16)]),
+          ]
+        ));
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => const Icon(Icons.error),
     );
   }
 
-  Widget _buildStaffChart() {
-    final staff = ref.watch(staffProvider);
-    double dAv = staff.where((s)=>s.role=='Doctor' && s.available).length.toDouble();
-    double dUn = staff.where((s)=>s.role=='Doctor' && !s.available).length.toDouble();
-    double nAv = staff.where((s)=>s.role=='Nurse' && s.available).length.toDouble();
-    double nUn = staff.where((s)=>s.role=='Nurse' && !s.available).length.toDouble();
+  Widget _buildStaffChart(AsyncValue<List<StaffModel>> staffAsync) {
+    return staffAsync.when(
+      data: (staff) {
+        double dAv = staff.where((s)=>s.role=='Doctor' && s.available).length.toDouble();
+        double dUn = staff.where((s)=>s.role=='Doctor' && !s.available).length.toDouble();
+        double nAv = staff.where((s)=>s.role=='Nurse' && s.available).length.toDouble();
+        double nUn = staff.where((s)=>s.role=='Nurse' && !s.available).length.toDouble();
 
-    return BarChart(
-      BarChartData(
-        alignment: BarChartAlignment.spaceEvenly,
-        maxY: 10,
-        barTouchData: BarTouchData(
-          enabled: true,
-          touchTooltipData: BarTouchTooltipData(getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem('${rod.toY.round()}', const TextStyle(color: Colors.white))),
-          touchCallback: (event, response) {
-            if (event is FlTapUpEvent && response?.spot != null) _showHistoryDetail('Staffing');
-          },
-        ),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['DOC','NRS'][v.toInt()], style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)))
+        return BarChart(BarChartData(
+          alignment: BarChartAlignment.spaceEvenly,
+          maxY: staff.length > 0 ? staff.length.toDouble() : 10,
+          titlesData: FlTitlesData(
+            topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
+            bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['DOC','NRS'][v.toInt()], style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)))),
           ),
-        ),
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        barGroups: [
-          BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: dAv, color: AppTheme.accent, width: 12), BarChartRodData(toY: dUn, color: AppTheme.divider, width: 12)]),
-          BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: nAv, color: AppTheme.accent, width: 12), BarChartRodData(toY: nUn, color: AppTheme.divider, width: 12)]),
-        ]
-      ),
-      swapAnimationDuration: const Duration(milliseconds: 300),
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          barGroups: [
+            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: dAv, color: AppTheme.accent, width: 12), BarChartRodData(toY: dUn, color: AppTheme.divider, width: 12)]),
+            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: nAv, color: AppTheme.accent, width: 12), BarChartRodData(toY: nUn, color: AppTheme.divider, width: 12)]),
+          ]
+        ));
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => const Icon(Icons.error),
     );
   }
 
-  Widget _buildTriageChart() {
-    final p = ref.watch(patientsProvider);
-    double c = p.where((i)=>i.triageLevel=='CRITICAL').length.toDouble();
-    double u = p.where((i)=>i.triageLevel=='URGENT').length.toDouble();
-    double s = p.where((i)=>i.triageLevel=='STABLE').length.toDouble();
+  Widget _buildTriageChart(AsyncValue<List<PatientModel>> patientsAsync) {
+    return patientsAsync.when(
+      data: (p) {
+        final active = p.where((i) => i.attendanceStatus != 'Attended').toList();
+        double c = active.where((i)=>i.triageLevel=='CRITICAL').length.toDouble();
+        double u = active.where((i)=>i.triageLevel=='URGENT').length.toDouble();
+        double s = active.where((i)=>i.triageLevel=='STABLE').length.toDouble();
 
-    return BarChart(
-      BarChartData(
-        alignment: BarChartAlignment.spaceEvenly,
-        maxY: 10,
-        barTouchData: BarTouchData(
-          enabled: true,
-          touchTooltipData: BarTouchTooltipData(getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem('${rod.toY.round()}', const TextStyle(color: Colors.white))),
-          touchCallback: (event, response) {
-            if (event is FlTapUpEvent && response?.spot != null) _showHistoryDetail('Triage');
-          },
-        ),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['CRI','URG','STB'][v.toInt()], style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary)))
+        return BarChart(BarChartData(
+          alignment: BarChartAlignment.spaceEvenly,
+          maxY: active.length > 0 ? active.length.toDouble() : 10,
+          titlesData: FlTitlesData(
+            topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
+            bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['CRI','URG','STB'][v.toInt()], style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary)))),
           ),
-        ),
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        barGroups: [
-          BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: c, color: AppTheme.critical, width: 16)]),
-          BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: u, color: AppTheme.urgent, width: 16)]),
-          BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: s, color: AppTheme.stable, width: 16)]),
-        ]
-      ),
-      swapAnimationDuration: const Duration(milliseconds: 300),
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          barGroups: [
+            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: c, color: AppTheme.critical, width: 16)]),
+            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: u, color: AppTheme.urgent, width: 16)]),
+            BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: s, color: AppTheme.stable, width: 16)]),
+          ]
+        ));
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => const Icon(Icons.error),
     );
   }
 
-  void _showHistoryDetail(String title) {
-    showModalBottomSheet(context: context, backgroundColor: AppTheme.background, builder: (c) {
-      return Container(
-        height: 350,
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('$title — Detail View', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const Gap(16),
-            Expanded(
-              child: ListView(
-                children: [
-                  _histDetailRow('Today 14:00', '${title} updated (Active)'),
-                  _histDetailRow('Today 12:00', '${title} snapshot recorded'),
-                  _histDetailRow('Today 08:00', 'Shift handover checkpoint'),
-                  _histDetailRow('Yesterday 20:00', 'Night shift baseline recorded'),
-                  _histDetailRow('Yesterday 14:00', 'Midday analysis snapshot'),
-                ],
-              )
-            )
-          ],
-        )
-      );
-    });
-  }
-
-  Widget _histDetailRow(String time, String action) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(time, style: const TextStyle(fontWeight: FontWeight.bold)),
-          Text(action, style: const TextStyle(color: AppTheme.textSecondary)),
-        ],
-      )
-    );
-  }
-
-  Widget _buildPatientQueueSection() {
-    final incomingQueue = ref.watch(incomingPatientsProvider);
-    
+  Widget _buildPatientQueueSection(AsyncValue<List<PatientModel>> patientsAsync) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -494,42 +416,44 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           ],
         ),
         const Gap(16),
-        if (incomingQueue.isEmpty)
-          Center(
-            child: Column(
-              children: [
-                Icon(Icons.airline_seat_flat_outlined, size: 48, color: AppTheme.divider),
-                const Gap(8),
-                const Text('No incoming patients', style: TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.bold)),
-              ],
-            )
-          )
-        else
-          ...incomingQueue.map((p) => _buildIncomingQueueCard(p))
+        patientsAsync.when(
+          data: (patients) {
+            final incoming = patients.where((p) => p.attendanceStatus == 'Incoming' || p.attendanceStatus == 'Triaging').toList();
+            if (incoming.isEmpty) {
+              return Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.airline_seat_flat_outlined, size: 48, color: AppTheme.divider),
+                    const Gap(8),
+                    const Text('No incoming patients', style: TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.bold)),
+                  ],
+                )
+              );
+            }
+            return Column(children: incoming.map((p) => _buildIncomingQueueCard(p)).toList());
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Text('Error: $e'),
+        ),
       ],
     );
   }
 
-  Widget _buildIncomingQueueCard(IncomingPatientModel p) {
-    final h = p.etaSeconds ~/ 3600;
-    final m = (p.etaSeconds % 3600) ~/ 60;
-    final s = p.etaSeconds % 60;
-    final isArrived = p.etaSeconds <= 0;
-    final timeStr = isArrived ? 'ARRIVED' : 'ETA: $m:${s.toString().padLeft(2, '0')}';
-    
+  Widget _buildIncomingQueueCard(PatientModel p) {
+    bool isTriaging = p.attendanceStatus == 'Triaging';
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: isArrived ? AppTheme.critical : AppTheme.divider),
+        side: BorderSide(color: isTriaging ? AppTheme.accent : AppTheme.divider),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: isArrived ? AppTheme.critical : AppTheme.primaryLight,
-              child: Text(isArrived ? '!' : p.id.split('-').last, style: TextStyle(color: isArrived ? Colors.white : AppTheme.primaryDark, fontWeight: FontWeight.bold)),
+              backgroundColor: isTriaging ? AppTheme.accent.withValues(alpha: 0.1) : AppTheme.primaryLight,
+              child: Text(p.name[0], style: TextStyle(color: isTriaging ? AppTheme.accent : AppTheme.primaryDark, fontWeight: FontWeight.bold)),
             ),
             const Gap(16),
             Expanded(
@@ -537,27 +461,24 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                  Text(p.condition, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                  Text('${p.age}y • ${p.vitalsSummary}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
                 ],
               ),
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(color: isArrived ? AppTheme.critical : AppTheme.surface, borderRadius: BorderRadius.circular(8), border: isArrived ? null : Border.all(color: AppTheme.critical)),
-                  child: Text(timeStr, style: TextStyle(color: isArrived ? Colors.white : AppTheme.critical, fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
+                if (isTriaging)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: AppTheme.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                    child: const Text('Triaging...', style: TextStyle(color: AppTheme.accent, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
                 const Gap(8),
                 SizedBox(
-                  height: 30,
-                  child: OutlinedButton(
-                    onPressed: () {
-                      ref.read(incomingPatientsProvider.notifier).removeIncoming(p.id);
-                      context.push('/triage?name=${Uri.encodeComponent(p.name)}');
-                    },
-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12)),
+                  height: 35,
+                  child: ElevatedButton(
+                    onPressed: isTriaging ? null : () => context.push('/triage?id=${p.id}&name=${Uri.encodeComponent(p.name)}&age=${p.age}&gender=${p.gender}'),
                     child: const Text('Start Triage', style: TextStyle(fontSize: 12)),
                   ),
                 )
@@ -570,7 +491,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   void _showAddPatientSheet() {
-    String pName='New Patient', pAge='30', pCond='', pPri='STABLE', pGen='Female';
+    String pName=''; String pAge='30'; String pCond=''; String pPri='STABLE'; String pGen='Female';
     String? pDoc, pBed;
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
       return StatefulBuilder(
@@ -592,45 +513,48 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                       const Gap(12),
                       Expanded(child: DropdownButtonFormField<String>(
                         decoration: const InputDecoration(labelText: 'Gender*'),
-                        value: 'Female', items: ['Male','Female','Other'].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
-                        onChanged: (v){ pGen = v!; }
+                        value: pGen, items: ['Male','Female','Other'].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                        onChanged: (v){ setState(() => pGen = v!); }
                       )),
                     ],
                   ),
                   const Gap(12),
-                  const TextField(decoration: InputDecoration(labelText: 'Contact Number*'), keyboardType: TextInputType.phone),
-                  const Gap(12),
-                  TextField(decoration: const InputDecoration(labelText: 'Reporting Condition* (Free text)'), maxLines: 2, onChanged: (v)=>pCond=v),
+                  TextField(decoration: const InputDecoration(labelText: 'Reporting Condition*'), maxLines: 2, onChanged: (v)=>pCond=v),
                   const Gap(12),
                   const Text('Priority*'),
                   const Gap(8),
                   Wrap(spacing: 8, children: ['Critical', 'High', 'Medium', 'Low'].map((pri) {
                     bool sel = pPri == pri.toUpperCase();
-                    return ChoiceChip(label: Text(pri, style: TextStyle(color: sel ? AppTheme.surface : AppTheme.textSecondary)), selectedColor: AppTheme.primary, selected: sel, onSelected: (_)=>setState(()=>pPri=pri.toUpperCase()));
+                    return ChoiceChip(label: Text(pri), selected: sel, onSelected: (_)=>setState(()=>pPri=pri.toUpperCase()));
                   }).toList()),
                   const Gap(12),
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(labelText: 'Assign Doctor'),
-                    items: ref.read(staffProvider).where((s)=>s.role=='Doctor').map((d) => DropdownMenuItem(value: d.uid, child: Text(d.name))).toList(),
+                    items: (ref.read(realStaffProvider).asData?.value ?? []).where((s)=>s.role=='Doctor').map((d) => DropdownMenuItem(value: d.uid, child: Text(d.name))).toList(),
                     onChanged: (v)=>pDoc=v
                   ),
                   const Gap(12),
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(labelText: 'Assign Bed'),
-                    items: ref.read(bedsProvider).where((b)=>b.status=='Available').map((b) => DropdownMenuItem(value: b.id, child: Text(b.id))).toList(),
+                    items: (ref.read(realBedsProvider).asData?.value ?? []).where((b)=>b.status=='Available').map((b) => DropdownMenuItem(value: b.id, child: Text(b.id))).toList(),
                     onChanged: (v)=>pBed=v
                   ),
                   const Gap(24),
-                  SizedBox(width: double.infinity, child: ElevatedButton(onPressed: (){
+                  SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () async {
                     if(pName.isNotEmpty && pCond.isNotEmpty){
-                      ref.read(patientsProvider.notifier).addPatient(PatientModel(
+                      final newPatient = PatientModel(
                         id: 'P-${DateTime.now().millisecondsSinceEpoch}',
                         name: pName, age: int.parse(pAge), gender: pGen,
                         triageLevel: pPri == 'HIGH' ? 'URGENT' : (pPri=='LOW'?'STABLE':pPri),
                         vitalsSummary: pCond,
                         assignedStaffId: pDoc, assignedBedId: pBed,
+                        attendanceStatus: 'Incoming',
                         lastVitalsTime: DateTime.now()
-                      ));
+                      );
+                      await ref.read(firestoreServiceProvider).addPatient(newPatient);
+                      if (pBed != null) {
+                        await ref.read(firestoreServiceProvider).updateBedStatus(pBed!, 'Occupied', patientName: pName);
+                      }
                       Navigator.pop(c);
                     }
                   }, child: const Text('Complete Admittance'))),
@@ -647,10 +571,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   Widget _buildAdminExtras() {
     return Column(
       children: [
+        _extraCard('Manage Hospital Beds', Icons.bed_outlined, _showManageBedsSheet),
         _extraCard('Department Control Panel', Icons.admin_panel_settings_outlined, _showDepartmentControlPanel),
         _extraCard('Staff Performance & Shifts', Icons.table_chart_outlined, _showStaffPerformance),
         _extraCard('Resource Inventory Explorer',Icons.inventory_2_outlined, _showResourceInventory),
-        _extraCard('Hospital Announcements', Icons.campaign_outlined, _showAnnouncementsPanel),
       ],
     );
   }
@@ -667,35 +591,180 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
-  void _showDepartmentControlPanel() {
-    bool icuLock = false; bool genLock = false; bool emrLock = false;
+  void _showManageBedsSheet() {
+    String bedId = '';
+    String bedType = 'General';
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return StatefulBuilder(builder: (ctx, setState) {
+      return StatefulBuilder(builder: (ctx, setSheetState) {
+        final bedsAsync = ref.watch(realBedsProvider);
         return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          maxChildSize: 0.9,
-          minChildSize: 0.4,
+          initialChildSize: 0.8,
+          maxChildSize: 0.95,
+          minChildSize: 0.5,
           expand: false,
           builder: (context, scrollController) {
-            return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom, left: 24, right: 24, top: 24), child: SingleChildScrollView(
-              controller: scrollController,
-              child: Column(
-                mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  const Text('Department Control Center', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const Gap(16),
-                  _deptCard('ICU', '9/10 beds occupied', 0.9, 12, 1, icuLock, (v)=>setState(()=>icuLock=v)),
-                  _deptCard('General', '13/20 beds occupied', 0.65, 30, 0, genLock, (v)=>setState(()=>genLock=v)),
-                  _deptCard('Emergency', '5/15 beds occupied', 0.33, 24, 3, emrLock, (v)=>setState(()=>emrLock=v)),
-                  const Gap(32),
-              ]),
-            ));
-          }
+            return Padding(
+              padding: const EdgeInsets.all(24),
+              child: SingleChildScrollView(
+                controller: scrollController,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('Bed Management Center', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    const Gap(24),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Register New Bed', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
+                          const Gap(16),
+                          TextField(
+                            decoration: const InputDecoration(labelText: 'Bed ID (e.g. ICU-05)'),
+                            textCapitalization: TextCapitalization.characters,
+                            onChanged: (v) => bedId = v,
+                          ),
+                          const Gap(12),
+                          DropdownButtonFormField<String>(
+                            decoration: const InputDecoration(labelText: 'Bed Type'),
+                            value: bedType,
+                            items: ['ICU', 'General', 'Emergency'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                            onChanged: (v) => setSheetState(() => bedType = v!),
+                          ),
+                          const Gap(16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                final finalId = bedId.trim().toUpperCase();
+                                if (finalId.isNotEmpty) {
+                                  final existingBeds = ref.read(realBedsProvider).asData?.value ?? [];
+                                  if (existingBeds.any((b) => b.id == finalId)) {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: AppTheme.critical, content: Text('Error: Bed ID already exists!')));
+                                    return;
+                                  }
+                                  final newBed = BedModel(id: finalId, type: bedType, status: 'Available');
+                                  await ref.read(firestoreServiceProvider).addBed(newBed);
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bed Registered!')));
+                                }
+                              },
+                              child: const Text('Add Bed'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Gap(32),
+                    const Text('Existing Beds Inventory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Gap(16),
+                    bedsAsync.when(
+                      data: (beds) => ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: beds.length,
+                        itemBuilder: (context, index) {
+                          final bed = beds[index];
+                          bool isOccupied = bed.status == 'Occupied';
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: ExpansionTile(
+                              leading: Icon(Icons.bed, color: bed.status == 'Available' ? AppTheme.stable : (bed.status == 'Occupied' ? AppTheme.critical : Colors.orange)),
+                              title: Text(bed.id, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              subtitle: Text('${bed.type} • ${bed.status} ${isOccupied ? "(${bed.patientName})" : ""}'),
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(child: TextField(
+                                            decoration: InputDecoration(hintText: isOccupied ? 'Occupied (Read Only)' : 'New ID'),
+                                            enabled: !isOccupied,
+                                            onChanged: (v) => bedId = v,
+                                          )),
+                                          const Gap(12),
+                                          IconButton(
+                                            icon: Icon(Icons.edit, color: isOccupied ? AppTheme.divider : AppTheme.primary),
+                                            onPressed: isOccupied ? null : () async {
+                                              final finalNewId = bedId.trim().toUpperCase();
+                                              if (finalNewId.isNotEmpty && finalNewId != bed.id) {
+                                                await ref.read(firestoreServiceProvider).addBed(bed.copyWith(id: finalNewId));
+                                                await ref.read(firestoreServiceProvider).deleteBed(bed.id);
+                                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bed Renamed!')));
+                                              }
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                      const Gap(16),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Row(children: [
+                                            const Text('Maintenance: '),
+                                            Switch(value: bed.status == 'Maintenance', onChanged: isOccupied ? null : (v) async {
+                                              await ref.read(firestoreServiceProvider).updateBedStatus(bed.id, v ? 'Maintenance' : 'Available');
+                                            }),
+                                          ]),
+                                          TextButton.icon(
+                                            onPressed: isOccupied ? null : () async {
+                                              await ref.read(firestoreServiceProvider).deleteBed(bed.id);
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bed Deleted!')));
+                                            },
+                                            icon: Icon(Icons.delete_outline, color: isOccupied ? AppTheme.divider : AppTheme.critical),
+                                            label: Text('Delete', style: TextStyle(color: isOccupied ? AppTheme.divider : AppTheme.critical)),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      loading: () => const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Text('Error: $e'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       });
     });
   }
 
-  Widget _deptCard(String name, String occStr, double pct, int staffCount, int alertsCount, bool isLocked, ValueChanged<bool> onToggle) {
+  void _showDepartmentControlPanel() {
+    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
+      return DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (context, scrollController) {
+          return Padding(padding: const EdgeInsets.all(24), child: SingleChildScrollView(
+            controller: scrollController,
+            child: Column(
+              mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const Text('Department Control Center', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Gap(16),
+                _deptCard('ICU', 'High Load', 0.9, 12, 1),
+                _deptCard('General', 'Stable', 0.65, 30, 0),
+                _deptCard('Emergency', 'Critical', 0.33, 24, 3),
+                const Gap(32),
+            ]),
+          ));
+        }
+      );
+    });
+  }
+
+  Widget _deptCard(String name, String status, double pct, int staffCount, int alertsCount) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -706,20 +775,16 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(children: [const Icon(Icons.local_hospital_outlined, color: AppTheme.primary), const Gap(8), Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
-                Switch(value: isLocked, onChanged: onToggle, activeColor: AppTheme.critical),
+                Text(status, style: TextStyle(color: pct > 0.8 ? AppTheme.critical : AppTheme.primary, fontWeight: FontWeight.bold)),
               ],
             ),
-            const Gap(8),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(occStr), Text('${(pct*100).toInt()}%')]),
-            const Gap(4),
+            const Gap(12),
             LinearProgressIndicator(value: pct, backgroundColor: AppTheme.divider, color: pct > 0.8 ? AppTheme.critical : AppTheme.primary),
             const Gap(12),
             Row(children: [
-              Text('Staff: $staffCount', style: const TextStyle(fontWeight: FontWeight.bold)), const Gap(16),
-              Text('Alerts: $alertsCount', style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.urgent)),
+              Text('Staff: $staffCount'), const Gap(16),
+              Text('Alerts: $alertsCount', style: const TextStyle(color: AppTheme.urgent)),
             ]),
-            const Gap(8),
-            const TextField(decoration: InputDecoration(hintText: 'Add supervisor note...', contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
           ],
         ),
       ),
@@ -727,192 +792,84 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   void _showStaffPerformance() {
-    bool sortAsc = true; int sortIdx = 0;
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return StatefulBuilder(builder: (ctx, setState) {
-        final staff = ref.watch(staffProvider).toList();
-        if (sortIdx == 3) {
-          staff.sort((a,b) => sortAsc ? a.averageResponseTimeSecs.compareTo(b.averageResponseTimeSecs) : b.averageResponseTimeSecs.compareTo(a.averageResponseTimeSecs));
-        } else if (sortIdx == 2) {
-          staff.sort((a,b) => sortAsc ? a.patientCount.compareTo(b.patientCount) : b.patientCount.compareTo(a.patientCount));
-        } else {
-          staff.sort((a,b) => sortAsc ? a.name.compareTo(b.name) : b.name.compareTo(a.name));
-        }
-
-        return Container(
+      return ref.watch(realStaffProvider).when(
+        data: (staff) => Container(
           height: MediaQuery.of(c).size.height * 0.85,
-          padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom, left: 16, right: 16, top: 24), 
-          child: Column(
-          mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Performance & Shifts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Gap(16),
-            Expanded(child: SingleChildScrollView(scrollDirection: Axis.vertical, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
-              sortColumnIndex: sortIdx, sortAscending: sortAsc,
-              columns: [
-                DataColumn(label: const Text('Name'), onSort: (i,a)=>setState((){sortIdx=i;sortAsc=a;})),
-                const DataColumn(label: Text('Role')),
-                DataColumn(label: const Text('Workload'), onSort: (i,a)=>setState((){sortIdx=i;sortAsc=a;})),
-                DataColumn(label: const Text('Avg Resp.'), onSort: (i,a)=>setState((){sortIdx=i;sortAsc=a;})),
-                const DataColumn(label: Text('Action')),
-              ],
-              rows: staff.map((s) => DataRow(cells: [
-                DataCell(Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold))),
-                DataCell(Text(s.role)),
-                DataCell(Text('${s.patientCount} pts handled')),
-                DataCell(Text('${s.averageResponseTimeSecs}s', style: TextStyle(color: s.averageResponseTimeSecs < 60 ? AppTheme.stable : (s.averageResponseTimeSecs > 100 ? AppTheme.critical : AppTheme.urgent), fontWeight: FontWeight.bold))),
-                DataCell(ElevatedButton(onPressed: ()=>ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Reminder sent to ${s.name}'))), child: const Text('Remind'))),
-              ])).toList(),
-            )))),
-        ])); 
-      });
-    });
-  }
-
-  void _showResourceInventory() {
-    // Initialize draft from current state
-    _inventoryDraft = Map.fromEntries(
-      ref.read(resourcesProvider).map((r) => MapEntry(r.id, r.count))
-    );
-
-    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return StatefulBuilder(builder: (ctx, setLocalState) {
-        if (_inventoryDraft == null) return const Center(child: CircularProgressIndicator());
-        
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.7,
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Resource Inventory', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
-                  IconButton(onPressed: () => Navigator.pop(c), icon: const Icon(Icons.close)),
-                ],
-              ),
-              const Gap(8),
-              const Text('Manage critical supplies and blood bank levels', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              const Text('Staff Performance & Shifts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const Gap(16),
               Expanded(
                 child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text('Blood Bank (Units)', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary, fontSize: 13)),
-                      const Gap(12),
-                      GridView.count(
-                        crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 2.5,
-                        children: [
-                          _resCard('A+', _inventoryDraft!['B-A'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-A']=v)),
-                          _resCard('B+', _inventoryDraft!['B-B'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-B']=v)),
-                          _resCard('O+', _inventoryDraft!['B-O'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-O']=v)),
-                          _resCard('AB+', _inventoryDraft!['B-AB'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['B-AB']=v)),
-                        ],
-                      ),
-                      const Gap(24),
-                      const Text('Critical Equipment', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary, fontSize: 13)),
-                      const Gap(12),
-                      _eqRow('Ventilators', _inventoryDraft!['E-V'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-V']=v)),
-                      _eqRow('Defibrillators', _inventoryDraft!['E-D'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-D']=v)),
-                      _eqRow('Oxygen Cylinders', _inventoryDraft!['E-O'] ?? 0, (v)=>setLocalState(()=>_inventoryDraft!['E-O']=v)),
-                      const Gap(12),
-                    ],
+                  scrollDirection: Axis.vertical,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Name')),
+                        DataColumn(label: Text('Role')),
+                        DataColumn(label: Text('Workload')),
+                        DataColumn(label: Text('Avg Resp.')),
+                      ],
+                      rows: staff.map((s) => DataRow(cells: [
+                        DataCell(Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold))),
+                        DataCell(Text(s.role)),
+                        DataCell(Text('${s.patientCount} pts')),
+                        DataCell(Text('${s.averageResponseTimeSecs}s')),
+                      ])).toList(),
+                    ),
                   ),
-                ),
-              ),
-              const Gap(16),
-              Container(
-                padding: const EdgeInsets.only(top: 16),
-                decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppTheme.divider))),
-                child: Row(
-                  children: [
-                    Expanded(child: OutlinedButton(onPressed: ()=>Navigator.pop(c), child: const Text('Cancel'))),
-                    const Gap(12),
-                    Expanded(child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white),
-                      onPressed: (){
-                        _inventoryDraft!.forEach((id, val) {
-                          ref.read(resourcesProvider.notifier).updateCount(id, val);
-                        });
-                        Navigator.pop(c);
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Inventory levels updated successfully.')));
-                      }, child: const Text('Update Inventory'))),
-                  ],
                 ),
               ),
             ],
           ),
-        );
-      });
+        ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Text('Error: $e'),
+      );
     });
   }
 
-  Widget _resCard(String t, int count, ValueChanged<int> onVal) {
-    bool low = count < 5;
-    return Container(
-      decoration: BoxDecoration(color: low ? AppTheme.criticalLight : AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: low ? AppTheme.critical : AppTheme.divider)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          IconButton(icon: const Icon(Icons.remove, size: 16), onPressed: ()=>onVal(count>0?count-1:0)),
-          Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(t, style: const TextStyle(fontWeight: FontWeight.bold)), Text('$count', style: TextStyle(color: low?AppTheme.critical:AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 18))]),
-          IconButton(icon: const Icon(Icons.add, size: 16), onPressed: ()=>onVal(count+1)),
-        ],
-      )
-    );
+  void _showResourceInventory() {
+    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
+      return Container(
+        height: MediaQuery.of(context).size.height * 0.7,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Resource Inventory', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Gap(24),
+            Expanded(
+              child: ListView(
+                children: [
+                  _inventoryRow('Ventilators', 18, 20),
+                  _inventoryRow('Oxygen Tanks', 42, 50),
+                  _inventoryRow('Blood (O+)', 12, 15),
+                  _inventoryRow('ICU Kits', 5, 10),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
-  Widget _eqRow(String t, int count, ValueChanged<int> onVal) {
-    bool low = count < 3;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: low ? AppTheme.critical : AppTheme.divider)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _inventoryRow(String item, int current, int total) {
+    double pct = current / total;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
         children: [
-          Text(t, style: const TextStyle(fontWeight: FontWeight.bold)),
-          Row(
-            children: [
-              IconButton(icon: const Icon(Icons.remove_circle_outline, color: AppTheme.textSecondary), onPressed: ()=>onVal(count>0?count-1:0)),
-              Text('$count', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: low?AppTheme.critical:AppTheme.textPrimary)),
-              IconButton(icon: const Icon(Icons.add_circle_outline, color: AppTheme.primary), onPressed: ()=>onVal(count+1)),
-            ],
-          )
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(item, style: const TextStyle(fontWeight: FontWeight.bold)), Text('$current/$total')]),
+          const Gap(8),
+          LinearProgressIndicator(value: pct, backgroundColor: AppTheme.divider, color: pct < 0.3 ? AppTheme.critical : AppTheme.primary, minHeight: 8),
         ],
       ),
     );
-  }
-
-  void _showAnnouncementsPanel() {
-    String title=''; String msg=''; bool isPri=false;
-    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return StatefulBuilder(builder: (ctx, setState) {
-        return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom, left: 24, right: 24, top: 24), child: SingleChildScrollView(child: Column(
-          mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Post Announcement', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Gap(16),
-            TextField(decoration: const InputDecoration(labelText: 'Title'), onChanged: (v)=>title=v),
-            const Gap(12),
-            TextField(decoration: const InputDecoration(labelText: 'Message'), maxLines: 3, onChanged: (v)=>msg=v),
-            const Gap(12),
-            Row(children: [
-              const Text('Priority Alert?'), const Spacer(),
-              Switch(value: isPri, onChanged: (v)=>setState(()=>isPri=v), activeColor: AppTheme.critical),
-            ]),
-            const Gap(16),
-            SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: (){
-              if(title.isNotEmpty && msg.isNotEmpty){
-                ref.read(announcementsProvider.notifier).addAnnouncement(AnnouncementModel(
-                  id: 'AN${DateTime.now().millisecond}', title: title, message: msg, isPriority: isPri, expiresAt: DateTime.now().add(const Duration(hours: 12))
-                ));
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Announcement successfully posted.')));
-              }
-            }, child: const Text('Post Announcement'))),
-            const Gap(32),
-        ]))); 
-      });
-    });
   }
 }

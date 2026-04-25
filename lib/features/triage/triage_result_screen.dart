@@ -1,31 +1,45 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
 import '../../app/theme.dart';
-import '../../mock/mock_data.dart';
 import '../../models/patient_model.dart';
+import '../../models/bed_model.dart';
 import 'dart:math';
 
-class TriageResultScreen extends ConsumerWidget {
+import '../../providers/auth_provider.dart';
+import '../../providers/firestore_providers.dart';
+import '../../services/firestore_service.dart';
+
+class TriageResultScreen extends ConsumerStatefulWidget {
   final String triageLevel;
   final String? name;
   final int? age;
   final String? gender;
-  const TriageResultScreen({super.key, required this.triageLevel, this.name, this.age, this.gender});
+  final String? patientId;
+  const TriageResultScreen({super.key, required this.triageLevel, this.name, this.age, this.gender, this.patientId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    Color levelColor = triageLevel == 'CRITICAL' ? AppTheme.critical : (triageLevel == 'URGENT' ? AppTheme.urgent : AppTheme.stable);
-    String desc = triageLevel == 'CRITICAL' ? 'Immediate life-saving intervention required.' : (triageLevel == 'URGENT' ? 'Urgent care needed, but not immediately life-threatening.' : 'Patient is stable, can wait for care.');
+  ConsumerState<TriageResultScreen> createState() => _TriageResultScreenState();
+}
+
+class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
+  String? selectedBedId;
+
+  @override
+  Widget build(BuildContext context) {
+    Color levelColor = widget.triageLevel == 'CRITICAL' ? AppTheme.critical : (widget.triageLevel == 'URGENT' ? AppTheme.urgent : AppTheme.stable);
+    String desc = widget.triageLevel == 'CRITICAL' ? 'Immediate life-saving intervention required.' : (widget.triageLevel == 'URGENT' ? 'Urgent care needed, but not immediately life-threatening.' : 'Patient is stable, can wait for care.');
+
+    final bedsAsync = ref.watch(realBedsProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('Triage Complete')),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(32.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
@@ -36,35 +50,118 @@ class TriageResultScreen extends ConsumerWidget {
                   Icon(Icons.assessment_outlined, size: 80, color: levelColor),
                   const Gap(24),
                   const Text('Classified As:', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
-                  Text(triageLevel, style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: levelColor)),
+                  Text(widget.triageLevel, style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: levelColor)),
                   const Gap(16),
                   Text(desc, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textPrimary)),
                 ],
               ),
             ),
+            const Gap(32),
+            
+            // Bed Selection Section - ONLY for NEW Emergency Triage
+            if (widget.patientId == null) ...[
+              const Text('Assign Bed (Optional)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Gap(12),
+            bedsAsync.when(
+              data: (beds) {
+                final availableBeds = beds.where((b) => b.status == 'Available').toList();
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.divider),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      hint: const Text('Select an available bed'),
+                      value: selectedBedId,
+                      items: availableBeds.map((b) => DropdownMenuItem(
+                        value: b.id,
+                        child: Text('${b.id} - ${b.type}'),
+                      )).toList(),
+                      onChanged: (v) => setState(() => selectedBedId = v),
+                    ),
+                  ),
+                );
+              },
+              loading: () => const Center(child: LinearProgressIndicator()),
+              error: (e, _) => Text('Error loading beds: $e'),
+            ),
+            ],
+
             const Gap(40),
             
             SizedBox(
               height: 56,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
-                onPressed: () {
-                  final curr = ref.read(currentUserProvider);
-                  // Generate an ID
-                  String id = 'P-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+                onPressed: () async {
+                  final user = ref.read(authNotifierProvider);
                   
-                  ref.read(patientsProvider.notifier).addPatient(PatientModel(
-                    id: id, 
-                    name: name?.isNotEmpty == true ? name! : 'Anonymous Trauma #${Random().nextInt(99)}', 
-                    age: age ?? 35, 
-                    gender: gender?.isNotEmpty == true ? gender! : 'Unknown',
-                    triageLevel: triageLevel, vitalsSummary: 'Assessed from Triage Engine',
-                    assignedStaffId: curr?.uid, lastVitalsTime: DateTime.now(),
-                    attendanceStatus: 'Pending',
-                  ));
+                  if (widget.patientId != null && widget.patientId!.isNotEmpty) {
+                    // UPDATE EXISTING
+                    int cooldownMins = 60; // Default stable
+                    if (widget.triageLevel == 'CRITICAL') cooldownMins = 15;
+                    if (widget.triageLevel == 'URGENT') cooldownMins = 30;
+
+                    await ref.read(firestoreServiceProvider).updatePatientFields(widget.patientId!, {
+                      'triageLevel': widget.triageLevel,
+                      'attendanceStatus': 'Pending',
+                      'vitalsSummary': 'Triage Updated: ${widget.triageLevel}',
+                      'lastVitalsTime': Timestamp.fromDate(DateTime.now()),
+                      'nextVitalsTime': Timestamp.fromDate(DateTime.now().add(Duration(minutes: cooldownMins))),
+                      'triagedBy': user?.name ?? 'Staff',
+                      'triagedByRole': user?.role ?? 'Role',
+                      // Do NOT overwrite bed if it's an existing patient from Admin flow
+                      if (selectedBedId != null) 'assignedBedId': selectedBedId,
+                    });
+                  } else {
+                    // ADD NEW
+                    int cooldownMins = 60; // Default stable
+                    if (widget.triageLevel == 'CRITICAL') cooldownMins = 15;
+                    if (widget.triageLevel == 'URGENT') cooldownMins = 30;
+
+                    final newPatient = PatientModel(
+                      id: '', 
+                      name: widget.name?.isNotEmpty == true ? widget.name! : 'Anonymous Trauma #${Random().nextInt(99)}', 
+                      age: widget.age ?? 35, 
+                      gender: widget.gender?.isNotEmpty == true ? widget.gender! : 'Unknown',
+                      triageLevel: widget.triageLevel, 
+                      vitalsSummary: 'Assessed from Triage Engine',
+                      assignedStaffId: user?.uid, 
+                      lastVitalsTime: DateTime.now(),
+                      nextVitalsTime: DateTime.now().add(Duration(minutes: cooldownMins)),
+                      attendanceStatus: 'Pending',
+                      triagedBy: user?.name ?? 'Staff',
+                      triagedByRole: user?.role ?? 'Role',
+                      assignedBedId: selectedBedId,
+                    );
+                    await ref.read(firestoreServiceProvider).addPatient(newPatient);
+                  }
+
+                  // Update Bed Status if selected
+                  if (selectedBedId != null) {
+                    await ref.read(firestoreServiceProvider).updateBedStatus(
+                      selectedBedId!, 
+                      'Occupied',
+                      patientId: widget.patientId ?? 'EMR-${DateTime.now().millisecondsSinceEpoch}',
+                      patientName: widget.name ?? 'Emergency Patient',
+                    );
+                  }
                   
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Patient saved and assigned.')));
-                  context.go('/doctor');
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Patient saved and assigned.')));
+                    
+                    if (user?.role == 'Admin') {
+                      context.go('/admin');
+                    } else if (user?.role == 'Nurse') {
+                      context.go('/nurse');
+                    } else {
+                      context.go('/doctor');
+                    }
+                  }
                 },
                 child: const Text('Save to Patient Record')
               ),
@@ -74,7 +171,16 @@ class TriageResultScreen extends ConsumerWidget {
               height: 56,
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(side: const BorderSide(color: AppTheme.divider), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: () => context.go('/doctor'),
+                onPressed: () {
+                  final user = ref.read(authNotifierProvider);
+                  if (user?.role == 'Admin') {
+                    context.go('/admin');
+                  } else if (user?.role == 'Nurse') {
+                    context.go('/nurse');
+                  } else {
+                    context.go('/doctor');
+                  }
+                },
                 child: const Text('Discard', style: TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
               )
             ),

@@ -101,14 +101,14 @@ class _AlertCardState extends State<AlertCard> {
                    const Gap(4),
                    Text(_activeTime, style: const TextStyle(color: AppTheme.critical, fontSize: 13, fontWeight: FontWeight.w900, fontFamily: 'monospace')),
                    const Spacer(),
-                   if (widget.alert.status == 'Acknowledged')
-                     Row(
-                       children: [
-                         const Icon(Icons.verified_user, size: 14, color: AppTheme.primary),
-                         const Gap(4),
-                         Text('Assigned to ${widget.alert.assignedTo}', style: const TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
-                       ],
-                     )
+                    if (widget.alert.status == 'Acknowledged' && widget.alert.assignedTo != null)
+                      Row(
+                        children: [
+                          const Icon(Icons.verified_user, size: 14, color: AppTheme.primary),
+                          const Gap(4),
+                          Text('Assigned to ${widget.alert.assignedTo}', style: const TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
+                        ],
+                      )
                    else
                      const Text('Unassigned', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontStyle: FontStyle.italic)),
                 ],

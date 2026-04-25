@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
 import '../../app/theme.dart';
-import '../../mock/mock_data.dart';
 import '../../providers/session_provider.dart';
+import '../../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -41,10 +41,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       valid = false;
     }
 
-    // Password rule: 3 characters + 1 special character + 4 characters
-    final pwdRegex = RegExp(r'^[a-zA-Z0-9]{3}[^a-zA-Z0-9][a-zA-Z0-9]{4}.*$');
-    if (!pwdRegex.hasMatch(pwd)) {
-      _pwdError = "Required: 3 chars, 1 special, then 4 chars (e.g. ABC@1234)";
+    if (pwd.length < 6) {
+      _pwdError = "Password must be at least 6 characters";
       valid = false;
     }
 
@@ -55,18 +53,43 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _performLogin() async {
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 1)); // Mock DB check
-
-    if (!mounted) return;
     
-    final staff = ref.read(staffProvider);
-    final user = staff.firstWhere((s) => s.role == selectedRole, orElse: () => staff.first);
-    ref.read(currentUserProvider.notifier).setUser(user);
-    ref.read(sessionProvider.notifier).startSession(selectedRole);
+    try {
+      await ref.read(authNotifierProvider.notifier).login(
+        _emailController.text.trim(),
+        _pwdController.text,
+      );
 
-    if (selectedRole == 'Admin') context.go('/admin');
-    else if (selectedRole == 'Doctor') context.go('/doctor');
-    else context.go('/nurse');
+      if (!mounted) return;
+      
+      final user = ref.read(authNotifierProvider);
+      if (user != null) {
+        if (user.role != selectedRole) {
+          throw 'Incorrect role selected for this account.';
+        }
+        
+        ref.read(sessionProvider.notifier).startSession(user.role);
+
+        if (user.role == 'Admin') {
+          context.go('/admin');
+        } else if (user.role == 'Doctor') {
+          context.go('/doctor');
+        } else {
+          context.go('/nurse');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString()),
+            backgroundColor: AppTheme.critical,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override

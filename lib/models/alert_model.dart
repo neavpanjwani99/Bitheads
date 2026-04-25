@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class AlertModel {
   final String id;
   final String type; // Mass Casualty, Equipment Failure, Staff Emergency, Patient Code Red
@@ -18,6 +20,32 @@ class AlertModel {
     required this.status,
     this.assignedTo,
   });
+
+  factory AlertModel.fromMap(Map<String, dynamic> map, [String? docId]) {
+    return AlertModel(
+      id: docId ?? map['id'] as String? ?? '',
+      type: map['type'] as String? ?? 'General',
+      severity: map['severity'] as String? ?? 'STABLE',
+      target: map['target'] as String? ?? 'All Staff',
+      message: map['message'] as String? ?? '',
+      createdAt: (map['createdAt'] as Timestamp).toDate(),
+      status: map['status'] as String? ?? 'Active',
+      assignedTo: map['assignedTo'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'type': type,
+      'severity': severity,
+      'target': target,
+      'message': message,
+      'createdAt': Timestamp.fromDate(createdAt),
+      'status': status,
+      'assignedTo': assignedTo,
+    };
+  }
 
   AlertModel copyWith({
     String? id,

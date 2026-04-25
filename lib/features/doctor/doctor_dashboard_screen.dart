@@ -3,15 +3,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
 import '../../app/theme.dart';
-import '../../mock/mock_data.dart';
+import '../../models/patient_model.dart';
+import '../../models/staff_model.dart';
+import '../../models/alert_model.dart';
 import '../../mock/concerns_provider.dart';
 import '../../mock/announcements_provider.dart';
-import '../../models/patient_model.dart';
-import '../../providers/session_provider.dart';
-import '../../providers/resources_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/firestore_providers.dart';
+import '../../services/firestore_service.dart';
+import '../../models/clinical_request_model.dart';
 import '../alerts/widgets/alert_card.dart';
 import '../../providers/clinical_status_providers.dart';
 import '../../widgets/mass_casualty_banner.dart';
+import '../../mock/announcements_provider.dart';
+import '../../providers/session_provider.dart';
 
 class DoctorDashboardScreen extends ConsumerStatefulWidget {
   const DoctorDashboardScreen({super.key});
@@ -31,132 +36,145 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = ref.watch(currentUserProvider);
+    final currentUser = ref.watch(authNotifierProvider);
     if (currentUser == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
-    final updatedStaff = ref.watch(staffProvider).firstWhere((s) => s.uid == currentUser.uid, orElse: () => currentUser);
-    final alerts = ref.watch(alertsProvider).where((a) => a.target == 'All Staff' || a.target == 'Doctors Only').toList();
+    final patientsAsync = ref.watch(realPatientsProvider);
+    final alertsAsync = ref.watch(realAlertsProvider);
+    final staffAsync = ref.watch(realStaffProvider);
+
+    final updatedStaff = staffAsync.asData?.value.firstWhere((s) => s.uid == currentUser.uid, orElse: () => currentUser) ?? currentUser;
     final announcements = ref.watch(announcementsProvider).where((a) => a.isActive).toList();
-    
-    List<PatientModel> allMyPatients = ref.watch(patientsProvider).where((p) => p.assignedStaffId == currentUser.uid).toList();
-    List<PatientModel> activePatients = allMyPatients.where((p) => p.attendanceStatus == 'Pending').toList();
-    activePatients.sort((a,b) => b.riskScore.compareTo(a.riskScore));
-    
-    // For work history logic
-    List<PatientModel> completedPatients = allMyPatients.where((p) => p.attendanceStatus != 'Pending').toList();
-
     final massCasualty = ref.watch(massCasualtyProvider);
-    ref.watch(secondTickerProvider); // Rebuild for timers
+    ref.watch(secondTickerProvider); 
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Physician Portal'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout_outlined), 
-            onPressed: () {
-              ref.read(sessionProvider.notifier).endSession();
-              context.go('/login');
-            }
-          )
-        ],
-      ),
-      body: Column(
-        children: [
-          if (massCasualty) const MassCasualtyBanner(),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-            // Header
-            Row(
-              children: [
-                CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
-                const Gap(16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(updatedStaff.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                      Text('${updatedStaff.hospitalId} • ${updatedStaff.specialization}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                    ],
-                  ),
-                ),
-                _buildAvailToggle(updatedStaff.available, () => ref.read(staffProvider.notifier).toggleAvailability(updatedStaff.uid, !updatedStaff.available)),
-              ],
-            ),
-            const Gap(32),
+    return patientsAsync.when(
+      loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+      error: (err, stack) => Scaffold(body: Center(child: Text('Error: $err'))),
+      data: (allPatients) {
+        final myPatients = allPatients.where((p) => p.assignedStaffId == currentUser.uid).toList();
+        final activePatients = myPatients.where((p) => 
+          p.attendanceStatus == 'Incoming' || 
+          p.attendanceStatus == 'Triaging' || 
+          p.attendanceStatus == 'Pending'
+        ).toList();
+        activePatients.sort((a,b) => b.riskScore.compareTo(a.riskScore));
+        final completedPatients = myPatients.where((p) => p.attendanceStatus == 'Attended').toList();
 
-            if (announcements.isNotEmpty) ...[
-              ...announcements.map((a) => _buildAnnouncementBanner(a)),
-              const Gap(16),
-            ],
-
-
-
-            Row(
-              children: [
-                Expanded(child: _actionBtn('Start Triage', Icons.medical_services_outlined, () => context.push('/triage'))),
-                const Gap(12),
-                Expanded(child: _actionBtn('Raise Concern', Icons.help_outline, () => _showConcernSheet(context, activePatients))),
-              ],
-            ),
-            const Gap(32),
-
-            const Text('Assigned Patients', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-            const Gap(16),
-            if (activePatients.isEmpty)
-               const Text('No assigned patients currently pending.', style: TextStyle(color: AppTheme.textSecondary))
-            else
-              for (final p in activePatients) _buildPatientCard(p, context),
-
-            const Gap(32),
-            const Text('Active Dispatch', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-            const Gap(16),
-            if (alerts.isEmpty)
-              const Text('All clear.', style: TextStyle(color: AppTheme.textSecondary))
-            else
-              for (final alert in alerts)
-                AlertCard(alert: alert, onTap: () => context.push('/alerts/${alert.id}')),
-                
-            const Gap(32),
-            const Text('Operations Log', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-            const Gap(16),
-            Card(
-              child: Column(
-                children: [
-                  TabBar(
-                    controller: _logTabController,
-                    labelColor: AppTheme.primary,
-                    unselectedLabelColor: AppTheme.textSecondary,
-                    indicatorColor: AppTheme.primary,
-                    tabs: const [Tab(text: 'Work Shift'), Tab(text: 'System Logins')],
-                  ),
-                  SizedBox(
-                    height: 250,
-                    child: TabBarView(
-                      controller: _logTabController,
-                      children: [
-                        _buildWorkHistory(completedPatients),
-                        _buildLoginHistory(),
-                      ],
-                    ),
+        return alertsAsync.when(
+          loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+          error: (e, s) => Scaffold(body: Center(child: Text('Error: $e'))),
+          data: (allAlerts) {
+            final alerts = allAlerts.where((a) {
+              final isHardcoded = a.id.startsWith('ALERT-');
+              return (a.target == 'All Staff' || a.target == 'Doctors Only') && a.status != 'Resolved' && !isHardcoded;
+            }).toList();
+            
+            return Scaffold(
+              backgroundColor: AppTheme.background,
+              appBar: AppBar(
+                title: const Text('Physician Portal'),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.logout_outlined), 
+                    onPressed: () {
+                      ref.read(sessionProvider.notifier).endSession();
+                      context.go('/login');
+                    }
                   )
                 ],
               ),
-            ),
-            const Gap(100),
-          ],
-        ),
-      ),
-    ),
-  ],
-),
-);
-}
+              body: Column(
+                children: [
+                  if (massCasualty) const MassCasualtyBanner(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
+                              const Gap(16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(updatedStaff.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                                    Text('${updatedStaff.hospitalId} • ${updatedStaff.specialization}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                              _buildAvailToggle(updatedStaff.available, () => ref.read(firestoreServiceProvider).toggleAvailability(updatedStaff.uid, !updatedStaff.available)),
+                            ],
+                          ),
+                          const Gap(32),
+                          _buildGlobalConcernBanner(currentUser.uid),
+                          if (announcements.isNotEmpty) ...[
+                            ...announcements.map((a) => _buildAnnouncementBanner(a)),
+                            const Gap(16),
+                          ],
+                          Row(
+                            children: [
+                              Expanded(child: _actionBtn('Start Triage', Icons.medical_services_outlined, () => _showTriageSelection(context))),
+                              const Gap(12),
+                              Expanded(child: _actionBtn('Raise Concern', Icons.help_outline, () => _showConcernSheet(context, activePatients))),
+                            ],
+                          ),
+                          const Gap(32),
+                          const Text('Assigned Patients', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                          const Gap(16),
+                          if (activePatients.isEmpty)
+                             const Text('No assigned patients currently pending.', style: TextStyle(color: AppTheme.textSecondary))
+                          else
+                            for (final p in activePatients) _buildPatientCard(p, context),
+                          const Gap(32),
+                          const Text('Active Dispatch', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                          const Gap(16),
+                          if (alerts.isEmpty)
+                            const Text('All clear.', style: TextStyle(color: AppTheme.textSecondary))
+                          else
+                            for (final alert in alerts)
+                              AlertCard(alert: alert, onTap: () => context.push('/alerts/${alert.id}')),
+                          const Gap(32),
+                          const Text('Operations Log', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                          const Gap(16),
+                          Card(
+                            child: Column(
+                              children: [
+                                TabBar(
+                                  controller: _logTabController,
+                                  labelColor: AppTheme.primary,
+                                  unselectedLabelColor: AppTheme.textSecondary,
+                                  indicatorColor: AppTheme.primary,
+                                  tabs: const [Tab(text: 'Work Shift'), Tab(text: 'System Logins')],
+                                ),
+                                SizedBox(
+                                  height: 250,
+                                  child: TabBarView(
+                                    controller: _logTabController,
+                                    children: [
+                                      _buildWorkHistory(completedPatients),
+                                      _buildLoginHistory(),
+                                    ],
+                                  ),
+                                )
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildAvailToggle(bool isAvail, VoidCallback onTap) {
     return InkWell(
@@ -238,19 +256,30 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
                   ],
                 ),
                 const Gap(24),
-                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: (){
+                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () async {
                   if(selPat != null && desc.isNotEmpty) {
-                    final curr = ref.read(currentUserProvider);
+                    final curr = ref.read(authNotifierProvider);
                     final pat = patients.firstWhere((p)=>p.id==selPat);
-                    ref.read(concernsProvider.notifier).addConcern(ConcernModel(
-                      id: 'C${DateTime.now().millisecondsSinceEpoch}',
-                      doctorId: curr!.uid, doctorName: curr.name,
-                      patientId: pat.id, patientName: pat.name,
-                      type: typ, description: desc, priority: pty,
-                      timeReceived: DateTime.now()
-                    ));
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Concern dispatched to Nursing.')));
+                    
+                    final newRequest = ClinicalRequestModel(
+                      id: '',
+                      patientId: pat.id,
+                      patientName: pat.name,
+                      doctorId: curr?.uid ?? '',
+                      doctorName: curr?.name ?? 'Doctor',
+                      type: 'CONCERN',
+                      description: desc,
+                      status: 'PENDING',
+                      priority: pty.toUpperCase(),
+                      createdAt: DateTime.now(),
+                    );
+                    
+                    await ref.read(firestoreServiceProvider).addClinicalRequest(newRequest);
+                    
+                    if (c.mounted) {
+                      Navigator.pop(c);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Concern dispatched to Nursing.')));
+                    }
                   }
                 }, child: const Text('Submit Concern'))),
                 const Gap(32),
@@ -275,43 +304,78 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
     }
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shadowColor: riskColor.withValues(alpha: 0.2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: riskColor.withValues(alpha: 0.1), width: 1)),
       child: InkWell(
         onTap: () => context.push('/patients/${p.id}'),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(20.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('${p.name}, ${p.age}${p.gender}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                  Text('Score: ${p.riskScore}', style: TextStyle(color: riskColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppTheme.textPrimary)),
+                        Text('${p.age}, ${p.gender}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: riskColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                    child: Text('Score: ${p.riskScore}', style: TextStyle(color: riskColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
                 ],
               ),
-              const Gap(8),
-              Row(
-                children: [
-                  Text(p.triageLevel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.triageLevel == 'CRITICAL' ? AppTheme.critical : AppTheme.textSecondary)),
-                  if (p.triageLevel == 'CRITICAL' && remaining > 0) ...[
-                    const Text(' • ', style: TextStyle(color: AppTheme.textSecondary)),
-                    Icon(Icons.timer_outlined, size: 12, color: remaining < 600 ? AppTheme.critical : AppTheme.urgent),
-                    const Gap(2),
-                    Text(
-                      '${(remaining ~/ 60).toString().padLeft(2,'0')}:${(remaining % 60).toString().padLeft(2,'0')}',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: remaining < 600 ? AppTheme.critical : AppTheme.urgent),
-                    ),
+              const Gap(16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppTheme.background, borderRadius: BorderRadius.circular(12)),
+                child: Row(
+                  children: [
+                    // Status Badge - If not triaged, show 'INCOMING' or similar
+                    if (p.triagedBy == null)
+                      _statusBadge('PENDING TRIAGE', AppTheme.textSecondary)
+                    else
+                      _statusBadge(p.triageLevel, p.triageLevel == 'CRITICAL' ? AppTheme.critical : (p.triageLevel == 'URGENT' ? AppTheme.urgent : AppTheme.stable)),
+                    
+                    // Timer - ONLY after triage AND only if CRITICAL
+                    if (p.triagedBy != null && p.triageLevel == 'CRITICAL' && remaining > 0) ...[
+                      const Gap(12),
+                      const Icon(Icons.timer_outlined, size: 16, color: AppTheme.urgent),
+                      const Gap(4),
+                      Text(
+                        '${(remaining ~/ 60).toString().padLeft(2,'0')}:${(remaining % 60).toString().padLeft(2,'0')}',
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.urgent),
+                      ),
+                    ],
+                    const Spacer(),
+                    const Icon(Icons.meeting_room_outlined, size: 16, color: AppTheme.textSecondary),
+                    const Gap(6),
+                    Text(p.assignedBedId ?? 'UNASSIGNED', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textPrimary)),
                   ],
-                  const Text(' • ', style: TextStyle(color: AppTheme.textSecondary)),
-                  Text('${p.assignedBedId}', style: const TextStyle(color: AppTheme.textSecondary)),
-                ],
+                ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _statusBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+      child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5)),
     );
   }
 
@@ -404,5 +468,174 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
   }
 
 
+  Widget _buildGlobalConcernBanner(String doctorId) {
+    final requestsAsync = ref.watch(realClinicalRequestsProvider);
+    return requestsAsync.when(
+      data: (allReqs) {
+        final pendingConcerns = allReqs.where((r) => 
+          r.doctorId == doctorId && 
+          r.type == 'CONCERN' && 
+          r.status == 'PENDING'
+        ).toList();
+
+        if (pendingConcerns.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          children: pendingConcerns.map((c) => Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.critical.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.critical.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: AppTheme.critical, size: 24),
+                const Gap(16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Active Request: CONCERN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.critical)),
+                      Text(
+                        'Waiting for Nursing to complete: "${c.description}" (Patient: ${c.patientName})',
+                        style: TextStyle(fontSize: 12, color: AppTheme.critical.withValues(alpha: 0.8)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )).toList(),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  void _showTriageSelection(BuildContext context) {
+    final incomingAsync = ref.watch(realIncomingPatientsProvider);
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (c) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          maxChildSize: 0.9,
+          minChildSize: 0.4,
+          expand: false,
+          builder: (_, scrollController) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2))),
+                  ),
+                  const Gap(24),
+                  const Text('Select Patient for Triage', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+                  const Gap(8),
+                  const Text('Select an admitted patient to start clinical assessment.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                  const Gap(24),
+                  Expanded(
+                    child: incomingAsync.when(
+                      data: (incoming) {
+                        if (incoming.isEmpty) {
+                          return Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.person_search_outlined, size: 64, color: AppTheme.divider),
+                                const Gap(16),
+                                const Text('No patients in Incoming Queue', style: TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                                const Gap(24),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.pop(c);
+                                      context.push('/triage');
+                                    },
+                                    child: const Text('Start Emergency Triage'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return ListView.separated(
+                          controller: scrollController,
+                          itemCount: incoming.length + 1,
+                          separatorBuilder: (_, __) => const Gap(12),
+                          itemBuilder: (context, index) {
+                            if (index == incoming.length) {
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8.0, bottom: 24),
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(16), side: const BorderSide(color: AppTheme.primary)),
+                                  onPressed: () {
+                                    Navigator.pop(c);
+                                    context.push('/triage');
+                                  },
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Triage New Patient'),
+                                ),
+                              );
+                            }
+                            final p = incoming[index];
+                            return Container(
+                              decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.all(16),
+                                leading: CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: AppTheme.primaryLight.withValues(alpha: 0.5),
+                                  child: Text(p.name.substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold)),
+                                ),
+                                title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Gap(4),
+                                    Text('${p.age} yrs • ${p.gender}', style: const TextStyle(fontSize: 13)),
+                                    const Gap(2),
+                                    Text(p.vitalsSummary, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  ],
+                                ),
+                                trailing: const Icon(Icons.chevron_right, color: AppTheme.divider),
+                                onTap: () async {
+                                  await ref.read(firestoreServiceProvider).updatePatientFields(p.id, {
+                                    'attendanceStatus': 'Triaging',
+                                    'triagedBy': ref.read(authNotifierProvider)?.name ?? 'Doctor',
+                                    'triagedByRole': 'Doctor',
+                                  });
+                                  if (context.mounted) {
+                                    Navigator.pop(c);
+                                    context.push('/triage?id=${p.id}&name=${Uri.encodeComponent(p.name)}&age=${p.age}&gender=${Uri.encodeComponent(p.gender)}');
+                                  }
+                                },
+                              ),
+                            );
+                          },
+                        );
+                      },
+                      loading: () => const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Center(child: Text('Error: $e')),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+        );
+      },
+    );
+  }
 }
 

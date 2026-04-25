@@ -23,6 +23,33 @@ class StaffModel {
     this.patientCount = 0,
   }) : hospitalId = hospitalId ?? generateHospitalId(role);
 
+  factory StaffModel.fromMap(Map<String, dynamic> map, String uid) {
+    return StaffModel(
+      uid: uid,
+      hospitalId: map['hospitalId'] as String?,
+      email: map['email'] as String? ?? '',
+      name: map['name'] as String? ?? 'Unknown',
+      role: map['role'] as String? ?? 'Nurse',
+      specialization: map['specialization'] as String? ?? 'General',
+      available: map['available'] as bool? ?? true,
+      averageResponseTimeSecs: map['averageResponseTimeSecs'] as int? ?? 120,
+      patientCount: map['patientCount'] as int? ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'hospitalId': hospitalId,
+      'email': email,
+      'name': name,
+      'role': role,
+      'specialization': specialization,
+      'available': available,
+      'averageResponseTimeSecs': averageResponseTimeSecs,
+      'patientCount': patientCount,
+    };
+  }
+
   static String generateHospitalId(String role) {
     final random = Random();
     final number = 1000 + random.nextInt(8999);

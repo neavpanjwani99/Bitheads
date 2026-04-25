@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class PatientModel {
   final String id;
   final String name;
@@ -14,6 +16,10 @@ class PatientModel {
   final List<String> orders;
   final List<int> vitalsTrend;
   final List<Map<String, dynamic>> events;
+  final String? triagedBy;
+  final String? triagedByRole;
+  final DateTime? lastNurseActionTime;
+  final DateTime? nextVitalsTime;
 
   PatientModel({
     required this.id,
@@ -31,7 +37,58 @@ class PatientModel {
     this.orders = const [],
     this.vitalsTrend = const [72, 75, 71, 78, 74],
     this.events = const [],
+    this.triagedBy,
+    this.triagedByRole,
+    this.lastNurseActionTime,
+    this.nextVitalsTime,
   });
+
+  factory PatientModel.fromMap(Map<String, dynamic> map, String id) {
+    return PatientModel(
+      id: id,
+      name: map['name'] as String? ?? 'Unknown',
+      age: map['age'] as int? ?? 0,
+      gender: map['gender'] as String? ?? 'M',
+      triageLevel: map['triageLevel'] as String? ?? 'STABLE',
+      vitalsSummary: map['vitalsSummary'] as String? ?? '',
+      assignedBedId: map['assignedBedId'] as String?,
+      assignedStaffId: map['assignedStaffId'] as String?,
+      lastVitalsTime: map['lastVitalsTime'] != null ? (map['lastVitalsTime'] as Timestamp).toDate() : null,
+      vitalStatus: map['vitalStatus'] as String? ?? 'normal',
+      notes: List<String>.from(map['notes'] ?? []),
+      attendanceStatus: map['attendanceStatus'] as String? ?? 'Pending',
+      orders: List<String>.from(map['orders'] ?? []),
+      vitalsTrend: List<int>.from(map['vitalsTrend'] ?? [72, 75, 71, 78, 74]),
+      events: List<Map<String, dynamic>>.from(map['events'] ?? []),
+      triagedBy: map['triagedBy'] as String?,
+      triagedByRole: map['triagedByRole'] as String?,
+      lastNurseActionTime: map['lastNurseActionTime'] != null ? (map['lastNurseActionTime'] as Timestamp).toDate() : null,
+      nextVitalsTime: map['nextVitalsTime'] != null ? (map['nextVitalsTime'] as Timestamp).toDate() : null,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'age': age,
+      'gender': gender,
+      'triageLevel': triageLevel,
+      'vitalsSummary': vitalsSummary,
+      'assignedBedId': assignedBedId,
+      'assignedStaffId': assignedStaffId,
+      'lastVitalsTime': lastVitalsTime != null ? Timestamp.fromDate(lastVitalsTime!) : null,
+      'vitalStatus': vitalStatus,
+      'notes': notes,
+      'attendanceStatus': attendanceStatus,
+      'orders': orders,
+      'vitalsTrend': vitalsTrend,
+      'events': events,
+      'triagedBy': triagedBy,
+      'triagedByRole': triagedByRole,
+      'lastNurseActionTime': lastNurseActionTime != null ? Timestamp.fromDate(lastNurseActionTime!) : null,
+      'nextVitalsTime': nextVitalsTime != null ? Timestamp.fromDate(nextVitalsTime!) : null,
+    };
+  }
 
   PatientModel copyWith({
     String? id,
@@ -49,6 +106,10 @@ class PatientModel {
     List<String>? orders,
     List<int>? vitalsTrend,
     List<Map<String, dynamic>>? events,
+    String? triagedBy,
+    String? triagedByRole,
+    DateTime? lastNurseActionTime,
+    DateTime? nextVitalsTime,
   }) {
     return PatientModel(
       id: id ?? this.id,
@@ -66,6 +127,10 @@ class PatientModel {
       orders: orders ?? this.orders,
       vitalsTrend: vitalsTrend ?? this.vitalsTrend,
       events: events ?? this.events,
+      triagedBy: triagedBy ?? this.triagedBy,
+      triagedByRole: triagedByRole ?? this.triagedByRole,
+      lastNurseActionTime: lastNurseActionTime ?? this.lastNurseActionTime,
+      nextVitalsTime: nextVitalsTime ?? this.nextVitalsTime,
     );
   }
 
@@ -85,7 +150,6 @@ class PatientModel {
       if (minsSinceCheck > 60) score += 20;
       else if (minsSinceCheck > 30) score += 10;
     } else {
-      // Unchecked
       score += 20;
     }
     

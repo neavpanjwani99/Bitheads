@@ -72,8 +72,9 @@ final router = GoRouter(
         final name = state.uri.queryParameters['name'];
         final age = int.tryParse(state.uri.queryParameters['age'] ?? '');
         final gender = state.uri.queryParameters['gender'];
+        final id = state.uri.queryParameters['id'];
         
-        return TriageResultScreen(triageLevel: level, name: name, age: age, gender: gender);
+        return TriageResultScreen(triageLevel: level, name: name, age: age, gender: gender, patientId: id);
       },
     ),
     GoRoute(

@@ -11,37 +11,42 @@ class TriageEngine {
     required double temp,
     required String symptoms,
   }) {
-    final parts = bp.split('/');
-    if (parts.length != 2) return TriageResult('URGENT', 'Invalid Vitals Format Provided.');
+    int systolic = 120;
     
-    final systolicStr = parts[0].replaceAll(RegExp(r'[^0-9]'), '');
-    final systolic = int.tryParse(systolicStr) ?? 120;
+    // BP Parsing improvements
+    if (bp.contains('/')) {
+      final parts = bp.split('/');
+      systolic = int.tryParse(parts[0].replaceAll(RegExp(r'[^0-9]'), '')) ?? 120;
+    } else {
+      // Single value entered - assume it is systolic if it is a number
+      systolic = int.tryParse(bp.replaceAll(RegExp(r'[^0-9]'), '')) ?? 120;
+    }
     
     final syms = symptoms.toLowerCase();
 
-    // CRITICAL — any one triggers CRITICAL
-    if (systolic < 90) return TriageResult('CRITICAL', 'Dangerously low blood pressure (${systolic}mmHg). Risk of shock.');
+    // CRITICAL
+    if (systolic < 90 && systolic > 0) return TriageResult('CRITICAL', 'Dangerously low blood pressure (${systolic}mmHg). Risk of shock.');
     if (systolic > 180) return TriageResult('CRITICAL', 'Hypertensive crisis detected (${systolic}mmHg).');
     if (heartRate > 130) return TriageResult('CRITICAL', 'Severe tachycardia (${heartRate}bpm). Cardiac risk.');
-    if (heartRate < 40) return TriageResult('CRITICAL', 'Severe bradycardia (${heartRate}bpm). Immediate attention needed.');
+    if (heartRate < 40 && heartRate > 0) return TriageResult('CRITICAL', 'Severe bradycardia (${heartRate}bpm). Immediate attention needed.');
     if (temp > 40.0) return TriageResult('CRITICAL', 'Hyperpyrexia (${temp}°C). Risk of organ damage.');
-    if (temp < 35.0) return TriageResult('CRITICAL', 'Hypothermia detected (${temp}°C). Life-threatening.');
+    if (temp < 35.0 && temp > 0) return TriageResult('CRITICAL', 'Hypothermia detected (${temp}°C). Life-threatening.');
     if (syms.contains('unconscious')) return TriageResult('CRITICAL', 'Patient unconscious. Immediate intervention required.');
-    if (syms.contains('chest pain')) return TriageResult('CRITICAL', 'Chest pain reported. Possible cardiac event.');
+    if (syms.contains('chest pain') || syms.contains('chest')) return TriageResult('CRITICAL', 'Chest pain reported. Possible cardiac event.');
     if (syms.contains('bleeding')) return TriageResult('CRITICAL', 'Active bleeding reported. Hemorrhage risk.');
     if (syms.contains('stroke')) return TriageResult('CRITICAL', 'Stroke symptoms present. Time-critical intervention needed.');
     if (syms.contains('seizure')) return TriageResult('CRITICAL', 'Seizure activity reported. Immediate care needed.');
 
     // URGENT
-    if (systolic < 100) return TriageResult('URGENT', 'Low blood pressure (${systolic}mmHg). Monitoring required.');
+    if (systolic < 100 && systolic > 0) return TriageResult('URGENT', 'Low blood pressure (${systolic}mmHg). Monitoring required.');
     if (systolic > 160) return TriageResult('URGENT', 'High blood pressure (${systolic}mmHg). Risk of complications.');
     if (heartRate > 110) return TriageResult('URGENT', 'Elevated heart rate (${heartRate}bpm). Needs assessment.');
-    if (heartRate < 55) return TriageResult('URGENT', 'Low heart rate (${heartRate}bpm). Cardiac monitoring needed.');
-    if (temp > 39.0) return TriageResult('URGENT', 'High fever (${temp}°C). Infection likely.');
-    if (temp < 36.0) return TriageResult('URGENT', 'Low body temperature (${temp}°C). Possible hypothermia onset.');
-    if (syms.contains('dizzy')) return TriageResult('URGENT', 'Dizziness with vitals suggest circulatory issue.');
-    if (syms.contains('vomiting')) return TriageResult('URGENT', 'Persistent vomiting. Dehydration and electrolyte risk.');
-    if (syms.contains('breathing')) return TriageResult('URGENT', 'Breathing difficulty reported. Respiratory assessment needed.');
+    if (heartRate < 55 && heartRate > 0) return TriageResult('URGENT', 'Low heart rate (${heartRate}bpm). Cardiac monitoring needed.');
+    if (temp > 38.5) return TriageResult('URGENT', 'High fever (${temp}°C). Infection likely.');
+    if (temp < 36.0 && temp > 0) return TriageResult('URGENT', 'Low body temperature (${temp}°C). Possible hypothermia onset.');
+    if (syms.contains('dizzy') || syms.contains('faint')) return TriageResult('URGENT', 'Dizziness or fainting reported. Circulatory assessment required.');
+    if (syms.contains('vomiting') || syms.contains('nausea')) return TriageResult('URGENT', 'Nausea/Vomiting. Dehydration and electrolyte risk.');
+    if (syms.contains('breathing') || syms.contains('sob')) return TriageResult('URGENT', 'Breathing difficulty reported. Respiratory assessment needed.');
     if (syms.contains('pain')) return TriageResult('URGENT', 'Pain symptoms with borderline vitals. Evaluation required.');
 
     // STABLE

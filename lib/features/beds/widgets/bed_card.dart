@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../models/bed_model.dart';
 import '../../../app/theme.dart';
-import '../../../mock/mock_data.dart';
 import 'package:gap/gap.dart';
 
 class BedCard extends ConsumerWidget {
@@ -15,22 +14,27 @@ class BedCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     Color statusColor;
     String helperText = '';
+    IconData icon = Icons.bed;
     
     switch (bed.status) {
       case 'Available':
         statusColor = AppTheme.stable;
         helperText = 'Tap to assign';
+        icon = Icons.bed;
         break;
       case 'Occupied':
         statusColor = AppTheme.critical;
         helperText = 'Patient Active';
+        icon = Icons.person;
         break;
-      case 'Reserved':
-        statusColor = AppTheme.urgent;
-        helperText = 'Awaiting Intake';
+      case 'Maintenance':
+        statusColor = Colors.orange;
+        helperText = 'Under Repair';
+        icon = Icons.build_outlined;
         break;
       default:
         statusColor = AppTheme.textSecondary;
+        icon = Icons.bed;
     }
 
     return AnimatedContainer(
@@ -54,14 +58,14 @@ class BedCard extends ConsumerWidget {
               if (bed.status == 'Occupied')
                 Flexible(
                   child: Text(
-                    ref.read(patientsProvider).firstWhere((p) => p.assignedBedId == bed.id, orElse: () => bed.type == 'ICU' ? ref.read(patientsProvider).first : ref.read(patientsProvider).last).name.split(' ')[0],
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    bed.patientName ?? 'Patient',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   ),
                 )
               else
-                Flexible(child: Icon(Icons.bed, color: statusColor, size: 36)),
+                Flexible(child: Icon(icon, color: statusColor, size: 36)),
               const Gap(4),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -70,7 +74,7 @@ class BedCard extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  bed.status,
+                  bed.status.toUpperCase(),
                   style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                 ),
               ),

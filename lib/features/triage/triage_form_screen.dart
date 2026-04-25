@@ -28,6 +28,22 @@ class _TriageFormScreenState extends ConsumerState<TriageFormScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // Pre-fill from query parameters
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final uri = GoRouterState.of(context).uri;
+      final name = uri.queryParameters['name'];
+      final age = uri.queryParameters['age'];
+      final gender = uri.queryParameters['gender'];
+      final id = uri.queryParameters['id'];
+
+      if (name != null) nameController.text = name;
+      if (age != null) ageController.text = age;
+      if (gender != null) genderController.text = gender;
+      
+      _evaluateForm();
+    });
+
     bpController.addListener(_evaluateForm);
     hrController.addListener(_evaluateForm);
     tempController.addListener(_evaluateForm);
@@ -130,10 +146,12 @@ class _TriageFormScreenState extends ConsumerState<TriageFormScreen> {
                 height: 56,
                 child: ElevatedButton(
                   onPressed: () {
+                    final id = GoRouterState.of(context).uri.queryParameters['id'] ?? '';
                     final nameArgs = nameController.text.isNotEmpty ? 'name=${Uri.encodeComponent(nameController.text)}&' : '';
                     final ageArgs = ageController.text.isNotEmpty ? 'age=${Uri.encodeComponent(ageController.text)}&' : '';
-                    final genderArgs = genderController.text.isNotEmpty ? 'gender=${Uri.encodeComponent(genderController.text)}' : '';
-                    context.push('/triage_result/$currentStatus?$nameArgs$ageArgs$genderArgs');
+                    final genderArgs = genderController.text.isNotEmpty ? 'gender=${Uri.encodeComponent(genderController.text)}&' : '';
+                    final idArg = id.isNotEmpty ? 'id=$id' : '';
+                    context.push('/triage_result/$currentStatus?$nameArgs$ageArgs$genderArgs$idArg');
                   }, 
                   child: const Text('Finalize Assessment')
                 ),

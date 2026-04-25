@@ -6,6 +6,7 @@ import 'dart:math';
 import '../../app/theme.dart';
 import '../../mock/mock_data.dart';
 import '../../models/alert_model.dart';
+import '../../services/firestore_service.dart';
 import 'widgets/alert_card.dart';
 
 class AlertTriggerScreen extends ConsumerStatefulWidget {
@@ -32,9 +33,9 @@ class _AlertTriggerScreenState extends ConsumerState<AlertTriggerScreen> {
     {'name': 'Custom Alert', 'icon': Icons.assignment_outlined},
   ];
 
-  void _sendAlert() {
+  void _sendAlert() async {
     final alert = AlertModel(
-      id: 'A${Random().nextInt(1000)}',
+      id: '', // Firestore will generate
       type: selectedType,
       severity: selectedSeverity,
       target: selectedTarget,
@@ -43,12 +44,14 @@ class _AlertTriggerScreenState extends ConsumerState<AlertTriggerScreen> {
       status: 'Active',
     );
 
-    ref.read(alertsProvider.notifier).addAlert(alert);
+    await ref.read(firestoreServiceProvider).addAlert(alert);
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Crisis Alert Broadcast Activated to $selectedTarget'), backgroundColor: AppTheme.critical),
-    );
-    context.pop();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Crisis Alert Broadcast Activated to $selectedTarget'), backgroundColor: AppTheme.critical),
+      );
+      context.pop();
+    }
   }
 
   @override
@@ -145,17 +148,19 @@ class _AlertTriggerScreenState extends ConsumerState<AlertTriggerScreen> {
               ),
               const Gap(24),
               
-              if (selectedType == 'Custom Alert') ...[
-                const Text('Additional Communication', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const Gap(8),
-                TextFormField(
-                  controller: msgController,
-                  maxLines: 4,
-                  onChanged: (_) => setState((){}),
-                  decoration: const InputDecoration(hintText: 'Enter specific emergency details...'),
+              const Text('Additional Communication', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const Gap(8),
+              TextFormField(
+                controller: msgController,
+                maxLines: 3,
+                onChanged: (_) => setState((){}),
+                decoration: const InputDecoration(
+                  hintText: 'Enter specific emergency details, ward locations, or instructions...',
+                  filled: true,
+                  fillColor: AppTheme.surface,
                 ),
-                const Gap(40),
-              ],
+              ),
+              const Gap(40),
 
               SizedBox(
                 width: double.infinity,
