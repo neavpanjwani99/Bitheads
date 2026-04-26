@@ -39,11 +39,14 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
     final currentUser = ref.watch(authNotifierProvider);
     if (currentUser == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
+    final staffAsync = ref.watch(realStaffProvider);
+    final updatedStaff = staffAsync.asData?.value.firstWhere((s) => s.uid == currentUser.uid, orElse: () => currentUser) ?? currentUser;
+
+    final deptsAsync = ref.watch(realDepartmentsProvider);
+    final isDrillActive = deptsAsync.asData?.value.any((d) => d.name == updatedStaff.specialization && d.isDrillActive) ?? false;
+
     final patientsAsync = ref.watch(realPatientsProvider);
     final alertsAsync = ref.watch(realAlertsProvider);
-    final staffAsync = ref.watch(realStaffProvider);
-
-    final updatedStaff = staffAsync.asData?.value.firstWhere((s) => s.uid == currentUser.uid, orElse: () => currentUser) ?? currentUser;
     final announcements = ref.watch(announcementsProvider).where((a) => a.isActive).toList();
     final massCasualty = ref.watch(massCasualtyProvider);
     ref.watch(secondTickerProvider); 
@@ -84,31 +87,50 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
                   )
                 ],
               ),
-              body: Column(
+              body: Stack(
                 children: [
-                  if (massCasualty) const MassCasualtyBanner(),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                  Column(
+                    children: [
+                      if (massCasualty) const MassCasualtyBanner(),
+                      if (updatedStaff.activeNudge != null)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          color: Colors.orange,
+                          child: Row(
                             children: [
-                              CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
-                              const Gap(16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(updatedStaff.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                                    Text('${updatedStaff.hospitalId} • ${updatedStaff.specialization}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                                  ],
-                                ),
-                              ),
-                              _buildAvailToggle(updatedStaff.available, () => ref.read(firestoreServiceProvider).toggleAvailability(updatedStaff.uid, !updatedStaff.available)),
+                              const Icon(Icons.info_outline, color: Colors.white),
+                              const Gap(12),
+                              Expanded(child: Text('NUDGE: ${updatedStaff.activeNudge}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                                onPressed: () => ref.read(firestoreServiceProvider).sendNudge(updatedStaff.uid, null),
+                              )
                             ],
                           ),
+                        ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
+                                  const Gap(16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(updatedStaff.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                                        Text('${updatedStaff.hospitalId} • ${updatedStaff.specialization}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                                      ],
+                                    ),
+                                  ),
+                                  _buildAvailToggle(updatedStaff.available, () => ref.read(firestoreServiceProvider).toggleAvailability(updatedStaff.uid, !updatedStaff.available)),
+                                ],
+                              ),
                           const Gap(32),
                           _buildGlobalConcernBanner(currentUser.uid),
                           if (announcements.isNotEmpty) ...[
@@ -163,13 +185,30 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
                               ],
                             ),
                           ),
-                        ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+              if (isDrillActive)
+                IgnorePointer(
+                  child: Container(
+                    decoration: BoxDecoration(border: Border.all(color: Colors.orange.withValues(alpha: 0.5), width: 10)),
+                    child: Center(
+                      child: Opacity(
+                        opacity: 0.1,
+                        child: Transform.rotate(
+                          angle: -0.5,
+                          child: const Text('DRILL MODE', style: TextStyle(fontSize: 80, fontWeight: FontWeight.bold, color: Colors.orange)),
+                        ),
                       ),
                     ),
                   ),
-                ],
-              ),
-            );
+                ),
+            ],
+          ),
+        );
           },
         );
       },
@@ -272,6 +311,7 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
                       status: 'PENDING',
                       priority: pty.toUpperCase(),
                       createdAt: DateTime.now(),
+                      assignedNurseId: pat.assignedNurseId,
                     );
                     
                     await ref.read(firestoreServiceProvider).addClinicalRequest(newRequest);

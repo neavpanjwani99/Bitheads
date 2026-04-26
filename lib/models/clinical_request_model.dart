@@ -11,6 +11,7 @@ class ClinicalRequestModel {
   final String status; // 'PENDING' or 'COMPLETED'
   final String priority; // 'NORMAL' or 'URGENT'
   final DateTime createdAt;
+  final String? assignedNurseId;
 
   ClinicalRequestModel({
     required this.id,
@@ -23,6 +24,7 @@ class ClinicalRequestModel {
     required this.status,
     required this.priority,
     required this.createdAt,
+    this.assignedNurseId,
   });
 
   Map<String, dynamic> toMap() {
@@ -36,6 +38,7 @@ class ClinicalRequestModel {
       'status': status,
       'priority': priority,
       'createdAt': Timestamp.fromDate(createdAt),
+      'assignedNurseId': assignedNurseId,
     };
   }
 
@@ -51,6 +54,7 @@ class ClinicalRequestModel {
       status: map['status'] ?? 'PENDING',
       priority: map['priority'] ?? 'NORMAL',
       createdAt: (map['createdAt'] as Timestamp).toDate(),
+      assignedNurseId: map['assignedNurseId'] as String?,
     );
   }
 }

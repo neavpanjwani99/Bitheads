@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../models/bed_model.dart';
 import '../../../app/theme.dart';
+import '../../../providers/auth_provider.dart';
 import 'package:gap/gap.dart';
 
 class BedCard extends ConsumerWidget {
@@ -19,7 +20,8 @@ class BedCard extends ConsumerWidget {
     switch (bed.status) {
       case 'Available':
         statusColor = AppTheme.stable;
-        helperText = 'Tap to assign';
+        final currentUser = ref.watch(authNotifierProvider);
+        helperText = currentUser?.role == 'Admin' ? 'Tap to assign' : '';
         icon = Icons.bed;
         break;
       case 'Occupied':
@@ -79,7 +81,8 @@ class BedCard extends ConsumerWidget {
                 ),
               ),
               const Gap(4),
-              Text(helperText, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (helperText.isNotEmpty)
+                Text(helperText, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis),
             ],
           ),
         ),

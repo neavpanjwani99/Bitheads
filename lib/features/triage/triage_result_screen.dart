@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
 import '../../app/theme.dart';
 import '../../models/patient_model.dart';
-import '../../models/bed_model.dart';
+import '../../models/staff_model.dart';
 import 'dart:math';
 
 import '../../providers/auth_provider.dart';
@@ -26,6 +26,7 @@ class TriageResultScreen extends ConsumerStatefulWidget {
 
 class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
   String? selectedBedId;
+  String? selectedNurseId;
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +34,7 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
     String desc = widget.triageLevel == 'CRITICAL' ? 'Immediate life-saving intervention required.' : (widget.triageLevel == 'URGENT' ? 'Urgent care needed, but not immediately life-threatening.' : 'Patient is stable, can wait for care.');
 
     final bedsAsync = ref.watch(realBedsProvider);
+    final staffAsync = ref.watch(realStaffProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -62,33 +64,84 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
             if (widget.patientId == null) ...[
               const Text('Assign Bed (Optional)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const Gap(12),
-            bedsAsync.when(
-              data: (beds) {
-                final availableBeds = beds.where((b) => b.status == 'Available').toList();
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      isExpanded: true,
-                      hint: const Text('Select an available bed'),
-                      value: selectedBedId,
-                      items: availableBeds.map((b) => DropdownMenuItem(
-                        value: b.id,
-                        child: Text('${b.id} - ${b.type}'),
-                      )).toList(),
-                      onChanged: (v) => setState(() => selectedBedId = v),
+              bedsAsync.when(
+                data: (beds) {
+                  final availableBeds = beds.where((b) => b.status == 'Available').toList();
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.divider),
                     ),
-                  ),
-                );
-              },
-              loading: () => const Center(child: LinearProgressIndicator()),
-              error: (e, _) => Text('Error loading beds: $e'),
-            ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        hint: const Text('Select an available bed'),
+                        value: selectedBedId,
+                        items: availableBeds.map((b) => DropdownMenuItem(
+                          value: b.id,
+                          child: Text('${b.id} - ${b.type}'),
+                        )).toList(),
+                        onChanged: (v) => setState(() => selectedBedId = v),
+                      ),
+                    ),
+                  );
+                },
+                loading: () => const Center(child: LinearProgressIndicator()),
+                error: (e, _) => Text('Error loading beds: $e'),
+              ),
+              const Gap(24),
+
+              // ── Assign Nurse ──────────────────────────────────────────
+              const Text('Assign Nurse (Optional)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Gap(12),
+              staffAsync.when(
+                data: (staff) {
+                  final nurses = staff.where((s) => s.role == 'Nurse').toList();
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.divider),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        hint: const Text('Select a nurse'),
+                        value: selectedNurseId,
+                        items: nurses.map((n) => DropdownMenuItem(
+                          value: n.uid,
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 14,
+                                backgroundColor: AppTheme.primaryLight,
+                                child: Text(n.name.substring(0, 1), style: const TextStyle(fontSize: 12, color: AppTheme.primaryDark, fontWeight: FontWeight.bold)),
+                              ),
+                              const Gap(10),
+                              Text(n.name),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: n.available ? AppTheme.stable.withValues(alpha: 0.1) : AppTheme.critical.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(n.available ? 'Available' : 'Busy', style: TextStyle(fontSize: 10, color: n.available ? AppTheme.stable : AppTheme.critical, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                        )).toList(),
+                        onChanged: (v) => setState(() => selectedNurseId = v),
+                      ),
+                    ),
+                  );
+                },
+                loading: () => const Center(child: LinearProgressIndicator()),
+                error: (e, _) => Text('Error loading staff: $e'),
+              ),
             ],
 
             const Gap(40),
@@ -102,7 +155,7 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
                   
                   if (widget.patientId != null && widget.patientId!.isNotEmpty) {
                     // UPDATE EXISTING
-                    int cooldownMins = 60; // Default stable
+                    int cooldownMins = 60;
                     if (widget.triageLevel == 'CRITICAL') cooldownMins = 15;
                     if (widget.triageLevel == 'URGENT') cooldownMins = 30;
 
@@ -114,12 +167,12 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
                       'nextVitalsTime': Timestamp.fromDate(DateTime.now().add(Duration(minutes: cooldownMins))),
                       'triagedBy': user?.name ?? 'Staff',
                       'triagedByRole': user?.role ?? 'Role',
-                      // Do NOT overwrite bed if it's an existing patient from Admin flow
                       if (selectedBedId != null) 'assignedBedId': selectedBedId,
+                      if (selectedNurseId != null) 'assignedNurseId': selectedNurseId,
                     });
                   } else {
                     // ADD NEW
-                    int cooldownMins = 60; // Default stable
+                    int cooldownMins = 60;
                     if (widget.triageLevel == 'CRITICAL') cooldownMins = 15;
                     if (widget.triageLevel == 'URGENT') cooldownMins = 30;
 
@@ -131,6 +184,7 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
                       triageLevel: widget.triageLevel, 
                       vitalsSummary: 'Assessed from Triage Engine',
                       assignedStaffId: user?.uid, 
+                      assignedNurseId: selectedNurseId,
                       lastVitalsTime: DateTime.now(),
                       nextVitalsTime: DateTime.now().add(Duration(minutes: cooldownMins)),
                       attendanceStatus: 'Pending',
@@ -139,6 +193,14 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
                       assignedBedId: selectedBedId,
                     );
                     await ref.read(firestoreServiceProvider).addPatient(newPatient);
+
+                    // Log to the assigned nurse's shift
+                    if (selectedNurseId != null) {
+                      await ref.read(firestoreServiceProvider).addLogToCurrentShift(
+                        selectedNurseId!,
+                        'New Patient Assigned: ${newPatient.name} (${widget.triageLevel})',
+                      );
+                    }
                   }
 
                   // Update Bed Status if selected

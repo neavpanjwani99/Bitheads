@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
+// SharedPreferences removed for Firestore-backed dismissal
 import '../../app/theme.dart';
 import '../../models/patient_model.dart';
 import '../../models/alert_model.dart';
@@ -29,17 +30,50 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   late Timer _timer;
   String _currentTime = '';
   Map<String, int>? _inventoryDraft;
+  final Set<String> _dismissedTriageIds = {};
 
-  @override
-  void initState() {
-    super.initState();
-    _updateTime();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) => _updateTime());
-  }
+    @override
+    void initState() {
+      super.initState();
+      _updateTime();
+      _timer = Timer.periodic(const Duration(seconds: 1), (t) => _updateTime());
+    }
+  
+    Future<void> _dismissTriage(String patientId) async {
+      final user = ref.read(authNotifierProvider);
+      if (user != null) {
+        await ref.read(firestoreServiceProvider).dismissTriage(user.uid, patientId);
+      }
+    }
 
   void _updateTime() {
     if (!mounted) return;
     setState(() => _currentTime = DateFormat('dd MMM yyyy — HH:mm:ss').format(DateTime.now()));
+  }
+
+  void _confirmDeletePatient(PatientModel p) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Patient Record?'),
+        content: Text('Are you sure you want to permanently remove ${p.name} from the queue? This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              if (p.assignedBedId != null) {
+                await ref.read(firestoreServiceProvider).updateBedStatus(p.assignedBedId!, 'Available');
+              }
+              await ref.read(firestoreServiceProvider).updatePatientFields(p.id, {'attendanceStatus': 'Deleted'});
+              if (ctx.mounted) Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${p.name} removed from queue and bed freed.')));
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.critical),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -56,6 +90,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final bedsAsync = ref.watch(realBedsProvider);
     final alertsAsync = ref.watch(realAlertsProvider);
     final currentUser = ref.watch(authNotifierProvider);
+    final dismissedAsync = currentUser != null 
+        ? ref.watch(dismissedTriageIdsProvider(currentUser.uid)) 
+        : const AsyncValue<List<String>>.data([]);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -78,6 +115,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     const Gap(32),
                   ],
                   _buildPatientQueueSection(patientsAsync),
+                  const Gap(32),
+                  _buildActiveDispatchSection(alertsAsync),
+                  const Gap(32),
+                  _buildTriageActivityFeed(patientsAsync, dismissedAsync),
                   const Gap(32),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -302,9 +343,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           gridData: const FlGridData(show: false),
           borderData: FlBorderData(show: false),
           barGroups: [
-            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: icuT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: icuO, color: AppTheme.primary, width: 12)]),
-            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: genT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: genO, color: AppTheme.primary, width: 12)]),
-            BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: emrT, color: AppTheme.primaryLight, width: 12), BarChartRodData(toY: emrO, color: AppTheme.primary, width: 12)]),
+            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: icuT, color: Colors.blue.shade100, width: 14), BarChartRodData(toY: icuO, color: Colors.indigoAccent, width: 14)]),
+            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: genT, color: Colors.blue.shade100, width: 14), BarChartRodData(toY: genO, color: Colors.indigoAccent, width: 14)]),
+            BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: emrT, color: Colors.blue.shade100, width: 14), BarChartRodData(toY: emrO, color: Colors.indigoAccent, width: 14)]),
           ]
         ));
       },
@@ -316,30 +357,101 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   Widget _buildAlertChart(AsyncValue<List<AlertModel>> alertsAsync) {
     return alertsAsync.when(
       data: (alerts) {
-        double c = alerts.where((a)=>a.severity=='CRITICAL' && a.status != 'Resolved').length.toDouble();
-        double u = alerts.where((a)=>a.severity=='URGENT' && a.status != 'Resolved').length.toDouble();
-        double s = alerts.where((a)=>a.severity=='STABLE' && a.status != 'Resolved').length.toDouble();
-        double r = alerts.where((a)=>a.status=='Resolved').length.toDouble();
+        // Show All-Time History to make the graph meaningful and rich
+        double c = alerts.where((a)=>a.severity=='CRITICAL').length.toDouble();
+        double u = alerts.where((a)=>a.severity=='URGENT').length.toDouble();
+        double s = alerts.where((a)=>a.severity=='STABLE').length.toDouble();
 
-        return BarChart(BarChartData(
-          alignment: BarChartAlignment.spaceEvenly,
-          maxY: (c+u+s+r) > 0 ? (c+u+s+r) : 10,
-          titlesData: FlTitlesData(
-            topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
-            bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['CRI','URG','STB','RES'][v.toInt()], style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary)))),
-          ),
-          gridData: const FlGridData(show: false),
-          borderData: FlBorderData(show: false),
-          barGroups: [
-            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: c, color: AppTheme.critical, width: 16)]),
-            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: u, color: AppTheme.urgent, width: 16)]),
-            BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: s, color: AppTheme.stable, width: 16)]),
-            BarChartGroupData(x: 3, barRods: [BarChartRodData(toY: r, color: AppTheme.textSecondary, width: 16)]),
-          ]
-        ));
+        return StatefulBuilder(
+          builder: (context, setState) {
+            int touchedIndex = -1;
+
+            return Column(
+              children: [
+                Expanded(
+                  child: PieChart(PieChartData(
+                    pieTouchData: PieTouchData(
+                      touchCallback: (FlTouchEvent event, pieTouchResponse) {
+                        setState(() {
+                          if (!event.isInterestedForInteractions || pieTouchResponse == null || pieTouchResponse.touchedSection == null) {
+                            touchedIndex = -1;
+                            return;
+                          }
+                          touchedIndex = pieTouchResponse.touchedSection!.touchedSectionIndex;
+                        });
+                      },
+                    ),
+                    sectionsSpace: 4,
+                    centerSpaceRadius: 40,
+                    sections: [
+                      PieChartSectionData(
+                        value: c == 0 ? 0.5 : c, 
+                        color: AppTheme.critical, 
+                        title: c.toInt().toString(), 
+                        radius: touchedIndex == 0 ? 45 : 35, 
+                        titleStyle: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        badgeWidget: touchedIndex == 0 ? _buildPieTooltip('CRI', c.toInt()) : null,
+                        badgePositionPercentageOffset: 1.2,
+                      ),
+                      PieChartSectionData(
+                        value: u == 0 ? 0.5 : u, 
+                        color: AppTheme.urgent, 
+                        title: u.toInt().toString(), 
+                        radius: touchedIndex == 1 ? 45 : 35, 
+                        titleStyle: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        badgeWidget: touchedIndex == 1 ? _buildPieTooltip('URG', u.toInt()) : null,
+                        badgePositionPercentageOffset: 1.2,
+                      ),
+                      PieChartSectionData(
+                        value: s == 0 ? 0.5 : s, 
+                        color: AppTheme.stable, 
+                        title: s.toInt().toString(), 
+                        radius: touchedIndex == 2 ? 45 : 35, 
+                        titleStyle: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        badgeWidget: touchedIndex == 2 ? _buildPieTooltip('STB', s.toInt()) : null,
+                        badgePositionPercentageOffset: 1.2,
+                      ),
+                    ]
+                  )),
+                ),
+                const Gap(12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildLegendItem('Critical', AppTheme.critical),
+                    _buildLegendItem('Urgent', AppTheme.urgent),
+                    _buildLegendItem('Stable', AppTheme.stable),
+                  ]
+                )
+              ]
+            );
+          }
+        );
       },
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => const Icon(Icons.error),
+    );
+  }
+
+  Widget _buildPieTooltip(String title, int value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(6),
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]
+      ),
+      child: Text('$title: $value', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _buildLegendItem(String title, Color c) {
+    return Row(
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+        const Gap(4),
+        Text(title, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+      ],
     );
   }
 
@@ -430,7 +542,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 )
               );
             }
-            return Column(children: incoming.map((p) => _buildIncomingQueueCard(p)).toList());
+            return Column(children: incoming.map((p) => _buildIncomingQueueCard(p)).toList().cast<Widget>());
           },
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => Text('Error: $e'),
@@ -441,59 +553,459 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
   Widget _buildIncomingQueueCard(PatientModel p) {
     bool isTriaging = p.attendanceStatus == 'Triaging';
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: isTriaging ? AppTheme.accent : AppTheme.divider),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isTriaging ? AppTheme.accent : AppTheme.divider),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: isTriaging ? AppTheme.accent.withValues(alpha: 0.1) : AppTheme.primaryLight,
-              child: Text(p.name[0], style: TextStyle(color: isTriaging ? AppTheme.accent : AppTheme.primaryDark, fontWeight: FontWeight.bold)),
-            ),
-            const Gap(16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                  Text('${p.age}y • ${p.vitalsSummary}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+      child: Row(
+        children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(color: isTriaging ? AppTheme.accent.withValues(alpha: 0.05) : AppTheme.surface, shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: Text(p.name[0].toUpperCase(), style: TextStyle(color: isTriaging ? AppTheme.accent : AppTheme.textSecondary, fontWeight: FontWeight.bold, fontSize: 18)),
+          ),
+          const Gap(16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (isTriaging)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: AppTheme.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                    child: const Text('Triaging...', style: TextStyle(color: AppTheme.accent, fontSize: 11, fontWeight: FontWeight.bold)),
-                  ),
-                const Gap(8),
-                SizedBox(
-                  height: 35,
-                  child: ElevatedButton(
-                    onPressed: isTriaging ? null : () => context.push('/triage?id=${p.id}&name=${Uri.encodeComponent(p.name)}&age=${p.age}&gender=${p.gender}'),
-                    child: const Text('Start Triage', style: TextStyle(fontSize: 12)),
-                  ),
-                )
+                Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textPrimary)),
+                const Gap(4),
+                Text('${p.age}y • ${p.vitalsSummary}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
               ],
-            )
-          ],
-        )
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (isTriaging)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(color: AppTheme.accent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
+                  child: const Text('Triaging...', style: TextStyle(color: AppTheme.accent, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+              Row(
+                children: [
+                  if (!isTriaging)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: AppTheme.textSecondary, size: 20),
+                      onPressed: () => _confirmDeletePatient(p),
+                    ),
+                  SizedBox(
+                    height: 38,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isTriaging ? const Color(0xFFE0E0E0) : const Color(0xFF4A90E2), // Light Blue
+                        foregroundColor: isTriaging ? const Color(0xFF9E9E9E) : Colors.white,
+                        elevation: isTriaging ? 0 : 2,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: isTriaging ? null : () => context.push('/triage?id=${p.id}&name=${Uri.encodeComponent(p.name)}&age=${p.age}&gender=${p.gender}'),
+                      child: const Text('Start Triage', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              )
+            ],
+          )
+        ],
       ),
     );
   }
 
-  void _showAddPatientSheet() {
-    String pName=''; String pAge='30'; String pCond=''; String pPri='STABLE'; String pGen='Female';
-    String? pDoc, pBed;
+  Widget _buildActiveDispatchSection(AsyncValue<List<AlertModel>> alertsAsync) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Active Dispatch', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+        const Gap(16),
+        alertsAsync.when(
+          data: (alerts) {
+            final active = alerts.where((a) => a.status != 'Resolved').toList();
+            if (active.isEmpty) return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No active dispatches', style: TextStyle(color: AppTheme.textSecondary))));
+            return Column(
+              children: active.map((a) {
+                bool isAck = a.status == 'Acknowledged';
+                Color color = a.severity == 'CRITICAL' ? AppTheme.critical : AppTheme.urgent;
+                final duration = DateTime.now().difference(a.createdAt);
+                final minutes = duration.inMinutes;
+                final seconds = duration.inSeconds % 60;
+                
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: color.withValues(alpha: 0.1)),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: IntrinsicHeight(
+                    child: Row(
+                      children: [
+                        Container(width: 8, color: color), // Thick Left Border from Image 2
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+                                      child: Text(a.severity, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                    ),
+                                  ],
+                                ),
+                                const Gap(12),
+                                Text(a.type, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+                                Text(a.message, style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+                                const Gap(16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.timer_outlined, size: 14, color: color),
+                                        const Gap(6),
+                                        Text('$minutes:${seconds.toString().padLeft(2, '0')}', style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 14)),
+                                      ],
+                                    ),
+                                    if (isAck)
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.verified_user_rounded, size: 16, color: AppTheme.primary),
+                                          const Gap(6),
+                                          Text(
+                                            'Assigned to ${a.assignedTo ?? "Staff"}', 
+                                            style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold, fontSize: 12)
+                                          ),
+                                        ],
+                                      )
+                                    else
+                                      const Text('PENDING ASSIGNMENT', style: TextStyle(color: AppTheme.critical, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList().cast<Widget>(),
+            );
+          },
+          loading: () => const LinearProgressIndicator(),
+          error: (e, _) => Text('Error: $e'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTriageActivityFeed(AsyncValue<List<PatientModel>> patientsAsync, AsyncValue<List<String>> dismissedAsync) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Recent Triage Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+        const Gap(16),
+        dismissedAsync.when(
+          data: (dismissedIds) => patientsAsync.when(
+            data: (patients) {
+              final recentTriage = patients
+                  .where((p) => p.triagedBy != null && 
+                                (p.attendanceStatus == 'Attended' || p.attendanceStatus == 'Pending') && 
+                                !dismissedIds.contains(p.id))
+                  .toList()
+                ..sort((a, b) => (b.lastVitalsTime ?? DateTime.now()).compareTo(a.lastVitalsTime ?? DateTime.now()));
+              
+              final displayList = recentTriage.take(3).toList(); 
+              if (displayList.isEmpty) return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No recent activity', style: TextStyle(color: AppTheme.textSecondary))));
+              
+              return Column(
+                children: displayList.map((p) => Dismissible(
+                  key: Key('triage_${p.id}'),
+                  onDismissed: (_) => _dismissTriage(p.id),
+                  direction: DismissDirection.horizontal,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16)),
+                    child: const Icon(Icons.delete_outline, color: Colors.red),
+                  ),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.divider),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))],
+                    ),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), shape: BoxShape.circle),
+                        child: const Icon(Icons.check_circle, color: Colors.green, size: 24),
+                      ),
+                      title: Text('Dr. ${p.triagedBy ?? "Staff"} triaged ${p.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Text('Triage: ${p.triageLevel} • ${DateFormat('HH:mm').format(p.lastVitalsTime ?? DateTime.now())}', style: const TextStyle(fontSize: 12)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.close, size: 18, color: AppTheme.textSecondary),
+                        onPressed: () => _dismissTriage(p.id),
+                      ),
+                    ),
+                  ),
+                )).toList().cast<Widget>(),
+              );
+            },
+            loading: () => const SizedBox.shrink(),
+            error: (e, _) => const SizedBox.shrink(),
+          ),
+          loading: () => const SizedBox.shrink(),
+          error: (e, _) => const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+
+  void _showDepartmentControlPanel() {
+    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (c) {
+      return Consumer(builder: (ctx, ref, child) {
+        final deptsAsync = ref.watch(realDepartmentsProvider);
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+              const Text('Strategic Response Hub', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Gap(8),
+              const Text('Monitor occupancy and trigger emergency drills', style: TextStyle(color: AppTheme.textSecondary)),
+              const Gap(24),
+              deptsAsync.when(
+                data: (depts) => ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: depts.length,
+                  itemBuilder: (context, i) {
+                    final d = depts[i];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: ListTile(
+                        leading: Icon(Icons.business_outlined, color: d.isDrillActive ? Colors.orange : AppTheme.primary),
+                        title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('Occupancy: ${d.occupiedBeds}/${d.totalBeds} (${d.occupancyRate.toStringAsFixed(1)}%)'),
+                        trailing: Switch(
+                          activeColor: Colors.orange,
+                          value: d.isDrillActive,
+                          onChanged: (v) => ref.read(firestoreServiceProvider).updateDrillStatus(d.id, v),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Text('Error: $e'),
+              ),
+              const Gap(24),
+            ],
+          ),
+          ),
+        );
+      });
+    });
+  }
+
+  void _showStaffPerformance() {
+    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (c) {
+      return Consumer(builder: (ctx, ref, child) {
+        final staffAsync = ref.watch(realStaffProvider);
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+              const Text('Care Activity Tracker', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Gap(8),
+              const Text('Monitor performance scores and nudge staff', style: TextStyle(color: AppTheme.textSecondary)),
+              const Gap(24),
+              staffAsync.when(
+                data: (staff) {
+                  final list = staff.where((s) => s.role != 'Admin').toList()
+                    ..sort((a, b) => b.performanceScore.compareTo(a.performanceScore));
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: list.length,
+                    itemBuilder: (context, i) {
+                      final s = list[i];
+                      bool isInactive = s.lastActivityAt != null && DateTime.now().difference(s.lastActivityAt!).inMinutes > 45;
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: isInactive ? AppTheme.critical : AppTheme.stable,
+                            child: Text('${s.performanceScore}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                          title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${s.role} • ${isInactive ? "Inactive 45m+" : "Active Now"}'),
+                          trailing: ElevatedButton(
+                            onPressed: () {
+                              ref.read(firestoreServiceProvider).sendNudge(s.uid, 'Your ward needs an update!');
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nudge sent to ${s.name}')));
+                            },
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, padding: const EdgeInsets.symmetric(horizontal: 12)),
+                            child: const Text('Nudge', style: TextStyle(fontSize: 11)),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Text('Error: $e'),
+              ),
+              const Gap(24),
+            ],
+          ),
+          ),
+        );
+      });
+    });
+  }
+
+  void _showResourceInventory() {
+    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (c) {
+      return Consumer(builder: (ctx, ref, child) {
+        final invAsync = ref.watch(realInventoryProvider);
+        final patientsAsync = ref.watch(realPatientsProvider);
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+              const Text('Predictive Supply Hub', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Gap(8),
+              const Text('Predictive survival timer based on patient load', style: TextStyle(color: AppTheme.textSecondary)),
+              const Gap(24),
+              invAsync.when(
+                data: (items) {
+                  final patientCount = patientsAsync.asData?.value.length ?? 0;
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: items.length,
+                    itemBuilder: (context, i) {
+                      final item = items[i];
+                      double hours = item.calculateSurvivalHours(patientCount);
+                      bool isCritical = item.currentStock <= item.minThreshold;
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: ListTile(
+                          leading: Icon(isCritical ? Icons.warning_amber_rounded : Icons.inventory_2, color: isCritical ? AppTheme.critical : AppTheme.primary),
+                          title: Text(item.itemName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('Stock: ${item.currentStock} ${item.unit}'),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              const Text('Survival Timer', style: TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
+                              Text('${(hours / 24).toStringAsFixed(1)} Days', style: TextStyle(fontWeight: FontWeight.bold, color: hours < 48 ? AppTheme.critical : AppTheme.stable)),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Text('Error: $e'),
+              ),
+              const Gap(16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _showBloodMatchSearch,
+                  icon: const Icon(Icons.search, size: 18),
+                  label: const Text('Find Emergency Blood Donors (Hero Feature)'),
+                ),
+              ),
+              const Gap(32),
+            ],
+          ),
+          ),
+        );
+      });
+    });
+  }
+
+  void _showBloodMatchSearch() {
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
+      return Consumer(builder: (ctx, ref, child) {
+        final staffAsync = ref.watch(realStaffProvider);
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+              const Text('Hero Feature: Donor Match', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.critical)),
+              const Gap(12),
+              const Text('Staff members eligible for emergency blood donation', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13), textAlign: TextAlign.center),
+              const Gap(24),
+              staffAsync.when(
+                data: (staff) {
+                  final donors = staff.where((s) => s.bloodGroup == 'O-' || s.bloodGroup == 'O+').toList();
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: donors.length,
+                    itemBuilder: (context, i) {
+                      final s = donors[i];
+                      return Card(
+                        child: ListTile(
+                          leading: const CircleAvatar(backgroundColor: AppTheme.critical, child: Icon(Icons.water_drop, color: Colors.white, size: 16)),
+                          title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${s.role} • Dept: ${s.specialization}'),
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(color: AppTheme.critical.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                            child: Text(s.bloodGroup, style: const TextStyle(color: AppTheme.critical, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+                loading: () => const CircularProgressIndicator(),
+                error: (e, _) => Text('Error: $e'),
+              ),
+              const Gap(24),
+            ],
+          ),
+          ),
+        );
+      });
+    });
+  }
+
+  void _showAddPatientSheet() {
+    String pName=''; String pAge='30'; String pCond=''; String pPri='STABLE'; String pGen='Female'; String pPhone='';
+    String? pDoc, pBed, pNurse;
+    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (c) {
       return StatefulBuilder(
         builder: (BuildContext context, StateSetter setState) {
           return Padding(
@@ -503,14 +1015,20 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Admit Patient', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
-                  const Gap(16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Admit Patient', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+                      IconButton(icon: const Icon(Icons.close, color: AppTheme.textSecondary), onPressed: () => Navigator.pop(c)),
+                    ],
+                  ),
+                  const Gap(24),
                   TextField(decoration: const InputDecoration(labelText: 'Patient Name*'), onChanged: (v)=>pName=v),
-                  const Gap(12),
+                  const Gap(16),
                   Row(
                     children: [
                       Expanded(child: TextField(decoration: const InputDecoration(labelText: 'Age*'), keyboardType: TextInputType.number, onChanged: (v)=>pAge=v)),
-                      const Gap(12),
+                      const Gap(16),
                       Expanded(child: DropdownButtonFormField<String>(
                         decoration: const InputDecoration(labelText: 'Gender*'),
                         value: pGen, items: ['Male','Female','Other'].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
@@ -518,47 +1036,80 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                       )),
                     ],
                   ),
-                  const Gap(12),
+                  const Gap(16),
+                  TextField(decoration: const InputDecoration(labelText: 'Contact Number'), keyboardType: TextInputType.phone, onChanged: (v)=>pPhone=v),
+                  const Gap(16),
                   TextField(decoration: const InputDecoration(labelText: 'Reporting Condition*'), maxLines: 2, onChanged: (v)=>pCond=v),
+                  const Gap(20),
+                  const Text('Priority*', style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
                   const Gap(12),
-                  const Text('Priority*'),
-                  const Gap(8),
                   Wrap(spacing: 8, children: ['Critical', 'High', 'Medium', 'Low'].map((pri) {
                     bool sel = pPri == pri.toUpperCase();
-                    return ChoiceChip(label: Text(pri), selected: sel, onSelected: (_)=>setState(()=>pPri=pri.toUpperCase()));
+                    Color chipColor = Colors.grey[200]!;
+                    if (sel) {
+                      if (pri == 'Critical') chipColor = AppTheme.critical.withValues(alpha: 0.15);
+                      else if (pri == 'High') chipColor = AppTheme.urgent.withValues(alpha: 0.15);
+                      else if (pri == 'Medium') chipColor = AppTheme.primary.withValues(alpha: 0.15);
+                      else chipColor = AppTheme.stable.withValues(alpha: 0.15);
+                    }
+                    Color textColor = sel ? (pri == 'Critical' ? AppTheme.critical : (pri == 'High' ? AppTheme.urgent : (pri == 'Medium' ? AppTheme.primary : AppTheme.stable))) : AppTheme.textSecondary;
+
+                    return ChoiceChip(
+                      label: Text(pri), 
+                      selected: sel, 
+                      selectedColor: chipColor,
+                      labelStyle: TextStyle(color: textColor, fontWeight: sel ? FontWeight.bold : FontWeight.normal),
+                      onSelected: (_)=>setState(()=>pPri=pri.toUpperCase())
+                    );
                   }).toList()),
-                  const Gap(12),
+                  const Gap(20),
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(labelText: 'Assign Doctor'),
                     items: (ref.read(realStaffProvider).asData?.value ?? []).where((s)=>s.role=='Doctor').map((d) => DropdownMenuItem(value: d.uid, child: Text(d.name))).toList(),
                     onChanged: (v)=>pDoc=v
                   ),
-                  const Gap(12),
+                  const Gap(16),
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(labelText: 'Assign Bed'),
                     items: (ref.read(realBedsProvider).asData?.value ?? []).where((b)=>b.status=='Available').map((b) => DropdownMenuItem(value: b.id, child: Text(b.id))).toList(),
                     onChanged: (v)=>pBed=v
                   ),
-                  const Gap(24),
+                  const Gap(16),
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(labelText: 'Assign Nurse'),
+                    items: (ref.read(realStaffProvider).asData?.value ?? []).where((s)=>s.role=='Nurse').map((n) => DropdownMenuItem(value: n.uid, child: Text(n.name))).toList(),
+                    onChanged: (v)=>pNurse=v
+                  ),
+                  const Gap(32),
                   SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () async {
                     if(pName.isNotEmpty && pCond.isNotEmpty){
+                      // Title Case Formatting: Nisha
+                      String formattedName = pName.trim();
+                      if (formattedName.isNotEmpty) {
+                        formattedName = formattedName[0].toUpperCase() + formattedName.substring(1).toLowerCase();
+                      }
+
                       final newPatient = PatientModel(
                         id: 'P-${DateTime.now().millisecondsSinceEpoch}',
-                        name: pName, age: int.parse(pAge), gender: pGen,
+                        name: formattedName, age: int.parse(pAge), gender: pGen,
                         triageLevel: pPri == 'HIGH' ? 'URGENT' : (pPri=='LOW'?'STABLE':pPri),
                         vitalsSummary: pCond,
                         assignedStaffId: pDoc, assignedBedId: pBed,
+                        assignedNurseId: pNurse,
+                        assignedNurseName: pNurse != null ? (ref.read(realStaffProvider).asData?.value ?? []).firstWhere((s)=>s.uid==pNurse).name : null,
                         attendanceStatus: 'Incoming',
-                        lastVitalsTime: DateTime.now()
+                        lastVitalsTime: DateTime.now(),
+                        careStartedAt: DateTime.now(),
+                        phone: pPhone,
                       );
                       await ref.read(firestoreServiceProvider).addPatient(newPatient);
                       if (pBed != null) {
-                        await ref.read(firestoreServiceProvider).updateBedStatus(pBed!, 'Occupied', patientName: pName);
+                        await ref.read(firestoreServiceProvider).updateBedStatus(pBed!, 'Occupied', patientName: formattedName);
                       }
                       Navigator.pop(c);
                     }
-                  }, child: const Text('Complete Admittance'))),
-                  const Gap(32),
+                  }, child: const Text('Complete Admittance', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)))),
+                  const Gap(40),
                 ],
               ),
             ),
@@ -572,9 +1123,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     return Column(
       children: [
         _extraCard('Manage Hospital Beds', Icons.bed_outlined, _showManageBedsSheet),
-        _extraCard('Department Control Panel', Icons.admin_panel_settings_outlined, _showDepartmentControlPanel),
-        _extraCard('Staff Performance & Shifts', Icons.table_chart_outlined, _showStaffPerformance),
-        _extraCard('Resource Inventory Explorer',Icons.inventory_2_outlined, _showResourceInventory),
+        _extraCard('Strategic Response Hub', Icons.admin_panel_settings_outlined, _showDepartmentControlPanel),
+        _extraCard('Care Activity Tracker', Icons.table_chart_outlined, _showStaffPerformance),
+        _extraCard('Predictive Supply Hub',Icons.inventory_2_outlined, _showResourceInventory),
       ],
     );
   }
@@ -592,10 +1143,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   void _showManageBedsSheet() {
-    String bedId = '';
+    final TextEditingController registerController = TextEditingController();
+    String registerId = '';
     String bedType = 'General';
+    final Map<String, String> renameDrafts = {};
+
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return StatefulBuilder(builder: (ctx, setSheetState) {
+      String? inModalMessage;
+      return Consumer(builder: (ctx, ref, child) {
         final bedsAsync = ref.watch(realBedsProvider);
         return DraggableScrollableSheet(
           initialChildSize: 0.8,
@@ -603,272 +1158,299 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           minChildSize: 0.5,
           expand: false,
           builder: (context, scrollController) {
-            return Padding(
-              padding: const EdgeInsets.all(24),
-              child: SingleChildScrollView(
-                controller: scrollController,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+            return StatefulBuilder(builder: (stContext, setLocalState) {
+              void showLocalFeedback(String msg) {
+                setLocalState(() => inModalMessage = msg);
+                Future.delayed(const Duration(seconds: 2), () {
+                  if (stContext.mounted) setLocalState(() => inModalMessage = null);
+                });
+              }
+
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Stack(
                   children: [
-                    const Text('Bed Management Center', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                    const Gap(24),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+                    SingleChildScrollView(
+                      controller: scrollController,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const Text('Register New Bed', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
-                          const Gap(16),
-                          TextField(
-                            decoration: const InputDecoration(labelText: 'Bed ID (e.g. ICU-05)'),
-                            textCapitalization: TextCapitalization.characters,
-                            onChanged: (v) => bedId = v,
-                          ),
-                          const Gap(12),
-                          DropdownButtonFormField<String>(
-                            decoration: const InputDecoration(labelText: 'Bed Type'),
-                            value: bedType,
-                            items: ['ICU', 'General', 'Emergency'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                            onChanged: (v) => setSheetState(() => bedType = v!),
-                          ),
-                          const Gap(16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: () async {
-                                final finalId = bedId.trim().toUpperCase();
-                                if (finalId.isNotEmpty) {
-                                  final existingBeds = ref.read(realBedsProvider).asData?.value ?? [];
-                                  if (existingBeds.any((b) => b.id == finalId)) {
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: AppTheme.critical, content: Text('Error: Bed ID already exists!')));
-                                    return;
-                                  }
-                                  final newBed = BedModel(id: finalId, type: bedType, status: 'Available');
-                                  await ref.read(firestoreServiceProvider).addBed(newBed);
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bed Registered!')));
-                                }
-                              },
-                              child: const Text('Add Bed'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Gap(32),
-                    const Text('Existing Beds Inventory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const Gap(16),
-                    bedsAsync.when(
-                      data: (beds) => ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: beds.length,
-                        itemBuilder: (context, index) {
-                          final bed = beds[index];
-                          bool isOccupied = bed.status == 'Occupied';
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            child: ExpansionTile(
-                              leading: Icon(Icons.bed, color: bed.status == 'Available' ? AppTheme.stable : (bed.status == 'Occupied' ? AppTheme.critical : Colors.orange)),
-                              title: Text(bed.id, style: const TextStyle(fontWeight: FontWeight.bold)),
-                              subtitle: Text('${bed.type} • ${bed.status} ${isOccupied ? "(${bed.patientName})" : ""}'),
+                          const Text('Bed Management Center', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                          const Gap(24),
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(child: TextField(
-                                            decoration: InputDecoration(hintText: isOccupied ? 'Occupied (Read Only)' : 'New ID'),
-                                            enabled: !isOccupied,
-                                            onChanged: (v) => bedId = v,
-                                          )),
-                                          const Gap(12),
-                                          IconButton(
-                                            icon: Icon(Icons.edit, color: isOccupied ? AppTheme.divider : AppTheme.primary),
-                                            onPressed: isOccupied ? null : () async {
-                                              final finalNewId = bedId.trim().toUpperCase();
-                                              if (finalNewId.isNotEmpty && finalNewId != bed.id) {
-                                                await ref.read(firestoreServiceProvider).addBed(bed.copyWith(id: finalNewId));
-                                                await ref.read(firestoreServiceProvider).deleteBed(bed.id);
-                                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bed Renamed!')));
-                                              }
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                      const Gap(16),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Row(children: [
-                                            const Text('Maintenance: '),
-                                            Switch(value: bed.status == 'Maintenance', onChanged: isOccupied ? null : (v) async {
-                                              await ref.read(firestoreServiceProvider).updateBedStatus(bed.id, v ? 'Maintenance' : 'Available');
-                                            }),
-                                          ]),
-                                          TextButton.icon(
-                                            onPressed: isOccupied ? null : () async {
-                                              await ref.read(firestoreServiceProvider).deleteBed(bed.id);
-                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bed Deleted!')));
-                                            },
-                                            icon: Icon(Icons.delete_outline, color: isOccupied ? AppTheme.divider : AppTheme.critical),
-                                            label: Text('Delete', style: TextStyle(color: isOccupied ? AppTheme.divider : AppTheme.critical)),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                const Text('Register New Bed', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
+                                const Gap(16),
+                                TextField(
+                                  controller: registerController,
+                                  decoration: const InputDecoration(labelText: 'Bed ID (e.g. ICU-05)'),
+                                  textCapitalization: TextCapitalization.characters,
+                                  onChanged: (v) => setLocalState(() => registerId = v.trim().toUpperCase()),
+                                ),
+                                const Gap(8),
+                                if (registerId.isNotEmpty)
+                                  Builder(builder: (context) {
+                                    final existingBeds = bedsAsync.asData?.value ?? [];
+                                    bool exists = existingBeds.any((b) => b.id == registerId);
+                                    return Row(
+                                      children: [
+                                        Icon(exists ? Icons.error_outline : Icons.check_circle_outline, 
+                                             size: 14, color: exists ? AppTheme.critical : Colors.green),
+                                        const Gap(4),
+                                        Text(
+                                          exists ? 'Bed ID "$registerId" already exists!' : 'Bed ID "$registerId" is available.',
+                                          style: TextStyle(fontSize: 12, color: exists ? AppTheme.critical : Colors.green, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    );
+                                  }),
+                                const Gap(12),
+                                DropdownButtonFormField<String>(
+                                  decoration: const InputDecoration(labelText: 'Bed Type'),
+                                  value: bedType,
+                                  items: ['ICU', 'General', 'Emergency'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                                  onChanged: (v) => setLocalState(() => bedType = v!),
+                                ),
+                                const Gap(16),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton(
+                                    onPressed: () {
+                                      if (registerId.isNotEmpty) {
+                                        final existingBeds = bedsAsync.asData?.value ?? [];
+                                        if (existingBeds.any((b) => b.id == registerId)) {
+                                          showLocalFeedback('Error: Bed ID exists!');
+                                          return;
+                                        }
+                                        
+                                        showLocalFeedback('Bed Registered!');
+                                        final newBed = BedModel(id: registerId, type: bedType, status: 'Available');
+                                        ref.read(firestoreServiceProvider).addBed(newBed);
+                                        
+                                        registerController.clear();
+                                        setLocalState(() => registerId = ''); 
+                                      }
+                                    },
+                                    child: const Text('Add Bed'),
                                   ),
                                 ),
                               ],
                             ),
-                          );
-                        },
+                          ),
+                          const Gap(32),
+                          const Text('Existing Beds Inventory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Gap(16),
+                          bedsAsync.when(
+                            data: (beds) => ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: beds.length,
+                              itemBuilder: (context, index) {
+                                final bed = beds[index];
+                                bool isOccupied = bed.status == 'Occupied';
+                                final draftId = renameDrafts[bed.id] ?? '';
+
+                                return Card(
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  child: ExpansionTile(
+                                    leading: Icon(Icons.bed, color: bed.status == 'Available' ? AppTheme.stable : (bed.status == 'Occupied' ? AppTheme.critical : Colors.orange)),
+                                    title: Text(bed.id, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    subtitle: Text('${bed.type} • ${bed.status} ${isOccupied ? "(${bed.patientName})" : ""}'),
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(child: TextField(
+                                                  decoration: InputDecoration(hintText: isOccupied ? 'Occupied (Read Only)' : 'New ID'),
+                                                  enabled: !isOccupied,
+                                                  textCapitalization: TextCapitalization.characters,
+                                                  onChanged: (v) => setLocalState(() => renameDrafts[bed.id] = v.trim().toUpperCase()),
+                                                )),
+                                                const Gap(12),
+                                                IconButton(
+                                                  icon: Icon(Icons.check_circle, color: isOccupied || draftId.isEmpty ? AppTheme.divider : AppTheme.primary),
+                                                  onPressed: isOccupied || draftId.isEmpty ? null : () {
+                                                    if (beds.any((b) => b.id == draftId)) {
+                                                      showLocalFeedback('Error: ID taken!');
+                                                      return;
+                                                    }
+                                                    
+                                                    showLocalFeedback('Bed Renamed!');
+                                                    final updatedBed = bed.copyWith(id: draftId);
+                                                    ref.read(firestoreServiceProvider).addBed(updatedBed);
+                                                    ref.read(firestoreServiceProvider).deleteBed(bed.id);
+                                                    
+                                                    setLocalState(() => renameDrafts.remove(bed.id));
+                                                  },
+                                                ),
+                                              ],
+                                            ),
+                                            if (draftId.isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 8.0, left: 4.0),
+                                                child: Builder(builder: (context) {
+                                                  bool exists = beds.any((b) => b.id == draftId);
+                                                  return Row(
+                                                    children: [
+                                                      Icon(exists ? Icons.error_outline : Icons.check_circle_outline, 
+                                                           size: 14, color: exists ? AppTheme.critical : Colors.green),
+                                                      const Gap(4),
+                                                      Text(
+                                                        exists ? 'ID "$draftId" taken!' : 'ID "$draftId" available.',
+                                                        style: TextStyle(fontSize: 11, color: exists ? AppTheme.critical : Colors.green, fontWeight: FontWeight.bold),
+                                                      ),
+                                                    ],
+                                                  );
+                                                }),
+                                              ),
+                                            const Gap(16),
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Text('Bed Status', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textSecondary)),
+                                                    const Gap(8),
+                                                    Row(
+                                                      children: [
+                                                        _statusChip(
+                                                          'Available', 
+                                                          bed.status == 'Available', 
+                                                          AppTheme.stable, 
+                                                          isOccupied ? null : () {
+                                                            showLocalFeedback('${bed.id} is Available');
+                                                            ref.read(firestoreServiceProvider).updateBedStatus(bed.id, 'Available');
+                                                          }
+                                                        ),
+                                                        const Gap(8),
+                                                        _statusChip(
+                                                          'Maintenance', 
+                                                          bed.status == 'Maintenance', 
+                                                          Colors.orange, 
+                                                          isOccupied ? null : () {
+                                                            showLocalFeedback('${bed.id} in Maintenance');
+                                                            ref.read(firestoreServiceProvider).updateBedStatus(bed.id, 'Maintenance');
+                                                          }
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                                IconButton(
+                                                  onPressed: isOccupied ? null : () {
+                                                    showLocalFeedback('Bed Deleted');
+                                                    ref.read(firestoreServiceProvider).deleteBed(bed.id);
+                                                  },
+                                                  icon: Icon(Icons.delete_forever, color: isOccupied ? AppTheme.divider : AppTheme.critical, size: 28),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                            loading: () => const Center(child: CircularProgressIndicator()),
+                            error: (e, _) => Text('Error: $e'),
+                          ),
+                        ],
                       ),
-                      loading: () => const Center(child: CircularProgressIndicator()),
-                      error: (e, _) => Text('Error: $e'),
                     ),
+                    if (inModalMessage != null)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: inModalMessage!.contains('Error') ? AppTheme.critical : AppTheme.primary,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 4, offset: const Offset(0, 2))],
+                            ),
+                            child: Text(inModalMessage!, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-              ),
-            );
+              );
+            });
           },
         );
       });
     });
   }
 
-  void _showDepartmentControlPanel() {
-    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        minChildSize: 0.4,
-        expand: false,
-        builder: (context, scrollController) {
-          return Padding(padding: const EdgeInsets.all(24), child: SingleChildScrollView(
-            controller: scrollController,
-            child: Column(
-              mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                const Text('Department Control Center', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const Gap(16),
-                _deptCard('ICU', 'High Load', 0.9, 12, 1),
-                _deptCard('General', 'Stable', 0.65, 30, 0),
-                _deptCard('Emergency', 'Critical', 0.33, 24, 3),
-                const Gap(32),
-            ]),
-          ));
-        }
-      );
-    });
-  }
-
-  Widget _deptCard(String name, String status, double pct, int staffCount, int alertsCount) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(children: [const Icon(Icons.local_hospital_outlined, color: AppTheme.primary), const Gap(8), Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
-                Text(status, style: TextStyle(color: pct > 0.8 ? AppTheme.critical : AppTheme.primary, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const Gap(12),
-            LinearProgressIndicator(value: pct, backgroundColor: AppTheme.divider, color: pct > 0.8 ? AppTheme.critical : AppTheme.primary),
-            const Gap(12),
-            Row(children: [
-              Text('Staff: $staffCount'), const Gap(16),
-              Text('Alerts: $alertsCount', style: const TextStyle(color: AppTheme.urgent)),
-            ]),
-          ],
-        ),
+  Widget _resCard(String t, int count, ValueChanged<int> onVal) {
+    bool low = count < 5;
+    return Container(
+      decoration: BoxDecoration(color: low ? AppTheme.critical.withValues(alpha: 0.1) : AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: low ? AppTheme.critical : AppTheme.divider)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          IconButton(icon: const Icon(Icons.remove, size: 16), onPressed: ()=>onVal(count>0?count-1:0)),
+          Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(t, style: const TextStyle(fontWeight: FontWeight.bold)), Text('$count', style: TextStyle(color: low?AppTheme.critical:AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 18))]),
+          IconButton(icon: const Icon(Icons.add, size: 16), onPressed: ()=>onVal(count+1)),
+        ],
       ),
     );
   }
 
-  void _showStaffPerformance() {
-    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return ref.watch(realStaffProvider).when(
-        data: (staff) => Container(
-          height: MediaQuery.of(c).size.height * 0.85,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget _eqRow(String t, int count, ValueChanged<int> onVal) {
+    bool low = count < 3;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: low ? AppTheme.critical : AppTheme.divider)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(t, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Row(
             children: [
-              const Text('Staff Performance & Shifts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const Gap(16),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('Name')),
-                        DataColumn(label: Text('Role')),
-                        DataColumn(label: Text('Workload')),
-                        DataColumn(label: Text('Avg Resp.')),
-                      ],
-                      rows: staff.map((s) => DataRow(cells: [
-                        DataCell(Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold))),
-                        DataCell(Text(s.role)),
-                        DataCell(Text('${s.patientCount} pts')),
-                        DataCell(Text('${s.averageResponseTimeSecs}s')),
-                      ])).toList(),
-                    ),
-                  ),
-                ),
-              ),
+              IconButton(icon: const Icon(Icons.remove_circle_outline, color: AppTheme.textSecondary), onPressed: ()=>onVal(count>0?count-1:0)),
+              Text('$count', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: low?AppTheme.critical:AppTheme.textPrimary)),
+              IconButton(icon: const Icon(Icons.add_circle_outline, color: AppTheme.primary), onPressed: ()=>onVal(count+1)),
             ],
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _statusChip(String label, bool isActive, Color color, VoidCallback? onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? color : color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color, width: 1.5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isActive ? Colors.white : color,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
           ),
         ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Text('Error: $e'),
-      );
-    });
-  }
-
-  void _showResourceInventory() {
-    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, builder: (c) {
-      return Container(
-        height: MediaQuery.of(context).size.height * 0.7,
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Resource Inventory', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const Gap(24),
-            Expanded(
-              child: ListView(
-                children: [
-                  _inventoryRow('Ventilators', 18, 20),
-                  _inventoryRow('Oxygen Tanks', 42, 50),
-                  _inventoryRow('Blood (O+)', 12, 15),
-                  _inventoryRow('ICU Kits', 5, 10),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    });
-  }
-
-  Widget _inventoryRow(String item, int current, int total) {
-    double pct = current / total;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(item, style: const TextStyle(fontWeight: FontWeight.bold)), Text('$current/$total')]),
-          const Gap(8),
-          LinearProgressIndicator(value: pct, backgroundColor: AppTheme.divider, color: pct < 0.3 ? AppTheme.critical : AppTheme.primary, minHeight: 8),
-        ],
       ),
     );
   }

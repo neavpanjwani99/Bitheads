@@ -49,7 +49,11 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
     setState(() {
       upcomingMeds[index]['given'] = true;
     });
-    ref.read(workHistoryProvider.notifier).addLogToCurrentShift('Administered Med: ${upcomingMeds[index]['med']} to ${upcomingMeds[index]['patient']}');
+    final uid = ref.read(authNotifierProvider)?.uid;
+    if (uid != null) {
+      final log = 'Med Given: ${upcomingMeds[index]['med']} to ${upcomingMeds[index]['patient']}';
+      ref.read(firestoreServiceProvider).addLogToCurrentShift(uid, log, isMedication: true);
+    }
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Medication completed.')));
   }
 
@@ -64,17 +68,21 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
     
     final massCasualty = ref.watch(massCasualtyProvider);
     
+    final staffAsync = ref.watch(realStaffProvider);
+    final updatedStaff = staffAsync.asData?.value.firstWhere((s) => s.uid == currentUser.uid, orElse: () => currentUser) ?? currentUser;
+
+    final deptsAsync = ref.watch(realDepartmentsProvider);
+    final isDrillActive = deptsAsync.asData?.value.any((d) => d.name == updatedStaff.specialization && d.isDrillActive) ?? false;
+
     return patientsAsync.when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (e, s) => Scaffold(body: Center(child: Text('Error: $e'))),
       data: (allPatients) {
-        final activePatients = allPatients.where((p) {
-          final isDue = p.nextVitalsTime == null || 
-              DateTime.now().isAfter(p.nextVitalsTime!);
-          
-          return (p.attendanceStatus == 'Incoming' || 
-                  p.attendanceStatus == 'Triaging' || 
-                  p.attendanceStatus == 'Pending') && isDue;
+        // FILTER: Only show patients assigned to this nurse
+        final myPatients = allPatients.where((p) => p.assignedNurseId == currentUser.uid).toList();
+        
+        final activePatients = myPatients.where((p) {
+          return p.attendanceStatus != 'Attended' && p.attendanceStatus != 'Discharged';
         }).toList();
         activePatients.sort((a,b) => b.riskScore.compareTo(a.riskScore));
         final completedPatients = allPatients.where((p) => p.attendanceStatus == 'Attended').toList();
@@ -93,10 +101,46 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
               )
             ],
           ),
-          body: Column(
+          body: Stack(
             children: [
-              if (massCasualty) const MassCasualtyBanner(),
-              Expanded(child: _currentIndex == 0 ? _buildDashboardBody(currentUser, activePatients, alertsAsync) : _buildBedTracker(bedsAsync)),
+              Column(
+                children: [
+                  if (massCasualty) const MassCasualtyBanner(),
+                  if (updatedStaff.activeNudge != null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      color: Colors.orange,
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, color: Colors.white),
+                          const Gap(12),
+                          Expanded(child: Text('NUDGE: ${updatedStaff.activeNudge}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                            onPressed: () => ref.read(firestoreServiceProvider).sendNudge(updatedStaff.uid, null),
+                          )
+                        ],
+                      ),
+                    ),
+                  Expanded(child: _currentIndex == 0 ? _buildDashboardBody(updatedStaff, activePatients, alertsAsync) : _buildBedTracker(bedsAsync)),
+                ],
+              ),
+              if (isDrillActive)
+                IgnorePointer(
+                  child: Container(
+                    decoration: BoxDecoration(border: Border.all(color: Colors.orange.withValues(alpha: 0.5), width: 10)),
+                    child: Center(
+                      child: Opacity(
+                        opacity: 0.1,
+                        child: Transform.rotate(
+                          angle: -0.5,
+                          child: const Text('DRILL MODE', style: TextStyle(fontSize: 80, fontWeight: FontWeight.bold, color: Colors.orange)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
           bottomNavigationBar: BottomNavigationBar(
@@ -170,6 +214,26 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
               };
               
               await ref.read(firestoreServiceProvider).updatePatientFields(p.id, updated);
+              final uid = ref.read(authNotifierProvider)?.uid;
+              if (uid != null) {
+                await ref.read(firestoreServiceProvider).updateActivityHeartbeat(uid);
+                await ref.read(firestoreServiceProvider).incrementStaffPerformance(uid, 2);
+                // Log vitals update to today's shift
+                await ref.read(firestoreServiceProvider).addLogToCurrentShift(
+                  uid,
+                  'Vitals Updated: ${p.name} — HR: $hr, BP: $bp, Temp: ${temp.toStringAsFixed(1)}°F',
+                );
+                // Increment patient count in today's shift doc
+                final today = DateTime.now();
+                final dateStr = '${today.year}-${today.month.toString().padLeft(2,'0')}-${today.day.toString().padLeft(2,'0')}';
+                final shiftRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('shifts').doc(dateStr);
+                final shiftDoc = await shiftRef.get();
+                if (shiftDoc.exists) {
+                  final logs = List<String>.from(shiftDoc.data()?['logs'] ?? []);
+                  final alreadyTracked = logs.any((l) => l.contains(p.name));
+                  if (!alreadyTracked) await shiftRef.update({'patientsCount': FieldValue.increment(1)});
+                }
+              }
               if (context.mounted) {
                 Navigator.pop(c);
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vitals updated live!')));
@@ -257,7 +321,7 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
           const Gap(16),
           ref.watch(realClinicalRequestsProvider).when(
             data: (allReqs) {
-              final reqs = allReqs.where((r) => r.status == 'PENDING').toList();
+              final reqs = allReqs.where((r) => r.status == 'PENDING' && r.assignedNurseId == currentUser.uid).toList();
               if (reqs.isEmpty) return const Text('No pending tasks from doctors.', style: TextStyle(color: AppTheme.textSecondary));
               return Column(
                 children: reqs.map((r) => _buildClinicalTaskCard(r)).toList(),
@@ -343,44 +407,61 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
   }
 
   Widget _buildWorkHistory() {
-    final history = ref.watch(workHistoryProvider);
-    
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: history.length,
-      itemBuilder: (context, index) {
-        final h = history[index];
-        final title = index == 0 ? 'Today Shift' : '${h.date.day} Apr';
-        final stats = '${h.patientsCount} Patients • ${h.medicationsGiven} Meds';
-        
-        final List<Widget> children = [
-          _histItem(title, 'Shift: ${h.shift}', stats, '${h.logs.length} Tasks • ${h.avgResponseTime} response'),
-        ];
-        
-        if (index == 0 && h.logs.isNotEmpty) {
-          children.add(
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(8)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: h.logs.map((log) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.history, size: 12, color: AppTheme.primary),
-                      const Gap(6),
-                      Expanded(child: Text(log, style: const TextStyle(fontSize: 12))),
-                    ],
-                  ),
-                )).toList(),
-              ),
-            )
+    final historyAsync = ref.watch(workHistoryProvider);
+
+    return historyAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('Error: $e')),
+      data: (history) {
+        if (history.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.history_toggle_off, size: 48, color: AppTheme.textSecondary),
+                Gap(12),
+                Text('No shift history yet.', style: TextStyle(color: AppTheme.textSecondary)),
+                Text('Your logs will appear here as you work!', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              ],
+            ),
           );
         }
-        
-        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: history.length,
+          itemBuilder: (context, index) {
+            final h = history[index];
+            final isToday = h.date.day == DateTime.now().day;
+            final title = isToday ? 'Today Shift' : '${h.date.day} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][h.date.month - 1]}';
+            final stats = '${h.patientsCount} Patients • ${h.medicationsGiven} Meds';
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _histItem(title, 'Shift: ${h.shift}', stats, '${h.tasksCompleted} Tasks • ${h.avgResponseTime} response'),
+                if (h.logs.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(8)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: h.logs.map((log) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.history, size: 12, color: AppTheme.primary),
+                            const Gap(6),
+                            Expanded(child: Text(log, style: const TextStyle(fontSize: 12))),
+                          ],
+                        ),
+                      )).toList(),
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
       },
     );
   }
@@ -499,6 +580,15 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
             child: OutlinedButton(
               onPressed: () async {
                 await ref.read(firestoreServiceProvider).updateClinicalRequestStatus(r.id, 'COMPLETED');
+                final uid = ref.read(authNotifierProvider)?.uid;
+                if (uid != null) {
+                  await ref.read(firestoreServiceProvider).incrementStaffPerformance(uid, 5);
+                  await ref.read(firestoreServiceProvider).addLogToCurrentShift(
+                    uid,
+                    'Completed ${r.type}: ${r.description} (Patient: ${r.patientName})',
+                    isTask: true,
+                  );
+                }
                 if (mounted) {
                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Task marked as completed.')));
                 }

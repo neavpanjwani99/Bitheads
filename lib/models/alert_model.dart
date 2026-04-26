@@ -9,6 +9,8 @@ class AlertModel {
   final DateTime createdAt;
   final String status; // Active, Acknowledged
   final String? assignedTo;
+  final String? assignedToName;
+  final String? assignedToRole;
 
   AlertModel({
     required this.id,
@@ -19,6 +21,8 @@ class AlertModel {
     required this.createdAt,
     required this.status,
     this.assignedTo,
+    this.assignedToName,
+    this.assignedToRole,
   });
 
   factory AlertModel.fromMap(Map<String, dynamic> map, [String? docId]) {
@@ -31,6 +35,8 @@ class AlertModel {
       createdAt: (map['createdAt'] as Timestamp).toDate(),
       status: map['status'] as String? ?? 'Active',
       assignedTo: map['assignedTo'] as String?,
+      assignedToName: map['assignedToName'] as String?,
+      assignedToRole: map['assignedToRole'] as String?,
     );
   }
 
@@ -44,6 +50,8 @@ class AlertModel {
       'createdAt': Timestamp.fromDate(createdAt),
       'status': status,
       'assignedTo': assignedTo,
+      'assignedToName': assignedToName,
+      'assignedToRole': assignedToRole,
     };
   }
 
@@ -56,6 +64,8 @@ class AlertModel {
     DateTime? createdAt,
     String? status,
     String? assignedTo,
+    String? assignedToName,
+    String? assignedToRole,
   }) {
     return AlertModel(
       id: id ?? this.id,
@@ -66,6 +76,8 @@ class AlertModel {
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       assignedTo: assignedTo ?? this.assignedTo,
+      assignedToName: assignedToName ?? this.assignedToName,
+      assignedToRole: assignedToRole ?? this.assignedToRole,
     );
   }
 }

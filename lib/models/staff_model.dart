@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math';
 
 class StaffModel {
@@ -10,6 +11,10 @@ class StaffModel {
   final bool available;
   final int averageResponseTimeSecs;
   final int patientCount;
+  final String bloodGroup; // Hero Feature: Donor Match
+  final int performanceScore; // 0-100
+  final DateTime? lastActivityAt; // For Nudge detection
+  final String? activeNudge; // Admin's orange message
 
   StaffModel({
     required this.uid,
@@ -21,6 +26,10 @@ class StaffModel {
     this.available = true,
     this.averageResponseTimeSecs = 120,
     this.patientCount = 0,
+    this.bloodGroup = 'O+',
+    this.performanceScore = 100,
+    this.lastActivityAt,
+    this.activeNudge,
   }) : hospitalId = hospitalId ?? generateHospitalId(role);
 
   factory StaffModel.fromMap(Map<String, dynamic> map, String uid) {
@@ -34,6 +43,10 @@ class StaffModel {
       available: map['available'] as bool? ?? true,
       averageResponseTimeSecs: map['averageResponseTimeSecs'] as int? ?? 120,
       patientCount: map['patientCount'] as int? ?? 0,
+      bloodGroup: map['bloodGroup'] as String? ?? 'O+',
+      performanceScore: map['performanceScore'] as int? ?? 100,
+      lastActivityAt: map['lastActivityAt'] != null ? (map['lastActivityAt'] as Timestamp).toDate() : null,
+      activeNudge: map['activeNudge'] as String?,
     );
   }
 
@@ -47,6 +60,10 @@ class StaffModel {
       'available': available,
       'averageResponseTimeSecs': averageResponseTimeSecs,
       'patientCount': patientCount,
+      'bloodGroup': bloodGroup,
+      'performanceScore': performanceScore,
+      'lastActivityAt': lastActivityAt != null ? Timestamp.fromDate(lastActivityAt!) : null,
+      'activeNudge': activeNudge,
     };
   }
 
@@ -74,6 +91,10 @@ class StaffModel {
       available: available ?? this.available,
       averageResponseTimeSecs: averageResponseTimeSecs ?? this.averageResponseTimeSecs,
       patientCount: patientCount ?? this.patientCount,
+      bloodGroup: this.bloodGroup,
+      performanceScore: this.performanceScore,
+      lastActivityAt: this.lastActivityAt,
+      activeNudge: this.activeNudge,
     );
   }
 }

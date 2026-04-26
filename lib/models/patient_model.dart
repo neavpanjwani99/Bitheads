@@ -20,6 +20,10 @@ class PatientModel {
   final String? triagedByRole;
   final DateTime? lastNurseActionTime;
   final DateTime? nextVitalsTime;
+  final String? phone;
+  final String? assignedNurseId; // New: Accountability
+  final String? assignedNurseName;
+  final DateTime? careStartedAt; // From Triage end to Discharge
 
   PatientModel({
     required this.id,
@@ -41,6 +45,10 @@ class PatientModel {
     this.triagedByRole,
     this.lastNurseActionTime,
     this.nextVitalsTime,
+    this.phone,
+    this.assignedNurseId,
+    this.assignedNurseName,
+    this.careStartedAt,
   });
 
   factory PatientModel.fromMap(Map<String, dynamic> map, String id) {
@@ -64,6 +72,10 @@ class PatientModel {
       triagedByRole: map['triagedByRole'] as String?,
       lastNurseActionTime: map['lastNurseActionTime'] != null ? (map['lastNurseActionTime'] as Timestamp).toDate() : null,
       nextVitalsTime: map['nextVitalsTime'] != null ? (map['nextVitalsTime'] as Timestamp).toDate() : null,
+      phone: map['phone'] as String?,
+      assignedNurseId: map['assignedNurseId'] as String?,
+      assignedNurseName: map['assignedNurseName'] as String?,
+      careStartedAt: map['careStartedAt'] != null ? (map['careStartedAt'] as Timestamp).toDate() : null,
     );
   }
 
@@ -87,6 +99,10 @@ class PatientModel {
       'triagedByRole': triagedByRole,
       'lastNurseActionTime': lastNurseActionTime != null ? Timestamp.fromDate(lastNurseActionTime!) : null,
       'nextVitalsTime': nextVitalsTime != null ? Timestamp.fromDate(nextVitalsTime!) : null,
+      'phone': phone,
+      'assignedNurseId': assignedNurseId,
+      'assignedNurseName': assignedNurseName,
+      'careStartedAt': careStartedAt != null ? Timestamp.fromDate(careStartedAt!) : null,
     };
   }
 
@@ -110,6 +126,7 @@ class PatientModel {
     String? triagedByRole,
     DateTime? lastNurseActionTime,
     DateTime? nextVitalsTime,
+    String? phone,
   }) {
     return PatientModel(
       id: id ?? this.id,
@@ -131,6 +148,10 @@ class PatientModel {
       triagedByRole: triagedByRole ?? this.triagedByRole,
       lastNurseActionTime: lastNurseActionTime ?? this.lastNurseActionTime,
       nextVitalsTime: nextVitalsTime ?? this.nextVitalsTime,
+      phone: phone ?? this.phone,
+      assignedNurseId: assignedNurseId ?? this.assignedNurseId,
+      assignedNurseName: assignedNurseName ?? this.assignedNurseName,
+      careStartedAt: careStartedAt ?? this.careStartedAt,
     );
   }
 

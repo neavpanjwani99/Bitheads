@@ -1,9 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class BedModel {
   final String id;
   final String type; // ICU, General, Emergency
   final String status; // Available, Occupied, Maintenance
   final String? patientId;
   final String? patientName;
+  final String? lastUpdatedBy;
+  final DateTime? lastUpdatedAt;
 
   BedModel({
     required this.id,
@@ -11,6 +15,8 @@ class BedModel {
     required this.status,
     this.patientId,
     this.patientName,
+    this.lastUpdatedBy,
+    this.lastUpdatedAt,
   });
 
   factory BedModel.fromMap(Map<String, dynamic> map, String id) {
@@ -20,6 +26,8 @@ class BedModel {
       status: map['status'] as String? ?? 'Available',
       patientId: map['patientId'] as String?,
       patientName: map['patientName'] as String?,
+      lastUpdatedBy: map['lastUpdatedBy'] as String?,
+      lastUpdatedAt: map['lastUpdatedAt'] != null ? (map['lastUpdatedAt'] as Timestamp).toDate() : null,
     );
   }
 
@@ -29,6 +37,8 @@ class BedModel {
       'status': status,
       'patientId': patientId,
       'patientName': patientName,
+      'lastUpdatedBy': lastUpdatedBy,
+      'lastUpdatedAt': lastUpdatedAt != null ? Timestamp.fromDate(lastUpdatedAt!) : null,
     };
   }
 
@@ -45,6 +55,8 @@ class BedModel {
       status: status ?? this.status,
       patientId: patientId ?? this.patientId,
       patientName: patientName ?? this.patientName,
+      lastUpdatedBy: lastUpdatedBy ?? this.lastUpdatedBy,
+      lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,
     );
   }
 }

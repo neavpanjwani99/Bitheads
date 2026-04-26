@@ -107,6 +107,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
                       status: 'PENDING',
                       priority: 'NORMAL',
                       createdAt: DateTime.now(),
+                      assignedNurseId: patient.assignedNurseId,
                     );
                     
                     await ref.read(firestoreServiceProvider).addClinicalRequest(newRequest);
@@ -259,6 +260,7 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
                     status: 'PENDING',
                     priority: pty.toUpperCase(),
                     createdAt: DateTime.now(),
+                    assignedNurseId: patient.assignedNurseId,
                   );
                   
                   await ref.read(firestoreServiceProvider).addClinicalRequest(newRequest);
@@ -451,6 +453,18 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
                         patientId: null,
                         patientName: null,
                       );
+                    }
+
+                    // Efficiency Score Logic
+                    final triageTime = patient.lastVitalsTime ?? DateTime.now().subtract(const Duration(hours: 1));
+                    final careDuration = DateTime.now().difference(triageTime).inHours;
+                    int points = 0;
+                    if (careDuration <= 2) points = 10;
+                    else if (careDuration <= 4) points = 5;
+                    
+                    final uid = ref.read(authNotifierProvider)?.uid;
+                    if (uid != null && points > 0) {
+                      await ref.read(firestoreServiceProvider).incrementStaffPerformance(uid, points);
                     }
 
                     if (context.mounted) {
