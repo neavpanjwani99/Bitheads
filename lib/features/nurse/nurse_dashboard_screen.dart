@@ -288,7 +288,7 @@ class _NurseDashboardScreenState extends ConsumerState<NurseDashboardScreen> wit
         children: [
           Row(
             children: [
-              CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.replaceAll('Nurse ', '').substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
+              CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.replaceAll('Nurse ', '').isNotEmpty ? updatedStaff.name.replaceAll('Nurse ', '')[0].toUpperCase() : '?', style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
               const Gap(16),
               Expanded(
                 child: Column(

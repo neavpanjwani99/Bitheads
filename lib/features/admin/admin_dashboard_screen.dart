@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gap/gap.dart';
@@ -568,7 +569,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             width: 48, height: 48,
             decoration: BoxDecoration(color: isTriaging ? AppTheme.accent.withValues(alpha: 0.05) : AppTheme.surface, shape: BoxShape.circle),
             alignment: Alignment.center,
-            child: Text(p.name[0].toUpperCase(), style: TextStyle(color: isTriaging ? AppTheme.accent : AppTheme.textSecondary, fontWeight: FontWeight.bold, fontSize: 18)),
+            child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : '?', style: TextStyle(color: isTriaging ? AppTheme.accent : AppTheme.textSecondary, fontWeight: FontWeight.bold, fontSize: 18)),
           ),
           const Gap(16),
           Expanded(
@@ -1005,6 +1006,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   void _showAddPatientSheet() {
     String pName=''; String pAge='30'; String pCond=''; String pPri='STABLE'; String pGen='Female'; String pPhone='';
     String? pDoc, pBed, pNurse;
+    String? phoneError;
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: AppTheme.background, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (c) {
       return StatefulBuilder(
         builder: (BuildContext context, StateSetter setState) {
@@ -1037,7 +1039,25 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     ],
                   ),
                   const Gap(16),
-                  TextField(decoration: const InputDecoration(labelText: 'Contact Number'), keyboardType: TextInputType.phone, onChanged: (v)=>pPhone=v),
+                  TextField(
+                    decoration: InputDecoration(
+                      labelText: 'Contact Number*',
+                      errorText: phoneError,
+                      prefixText: '+91 ',
+                      hintText: '10-digit number',
+                    ),
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
+                    ],
+                    onChanged: (v) {
+                      pPhone = v;
+                      if (v.length == 10) {
+                        setState(() => phoneError = null);
+                      }
+                    },
+                  ),
                   const Gap(16),
                   TextField(decoration: const InputDecoration(labelText: 'Reporting Condition*'), maxLines: 2, onChanged: (v)=>pCond=v),
                   const Gap(20),
@@ -1063,31 +1083,57 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     );
                   }).toList()),
                   const Gap(20),
-                  DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(labelText: 'Assign Doctor'),
-                    items: (ref.read(realStaffProvider).asData?.value ?? []).where((s)=>s.role=='Doctor').map((d) => DropdownMenuItem(value: d.uid, child: Text(d.name))).toList(),
-                    onChanged: (v)=>pDoc=v
+                  Consumer(
+                    builder: (context, ref, child) {
+                      final staff = ref.watch(realStaffProvider).asData?.value ?? [];
+                      // Force rebuild when availability changes
+                      final staffKey = staff.fold<String>('', (prev, s) => '$prev${s.uid}${s.available}');
+                      
+                      return DropdownButtonFormField<String>(
+                        key: ValueKey('doc_dropdown_$staffKey'),
+                        decoration: const InputDecoration(labelText: 'Assign Doctor'),
+                        items: staff.where((s)=>s.role=='Doctor').map((d) => DropdownMenuItem(
+                          value: d.uid, 
+                          child: Text('${d.name} (${d.available ? 'Available' : 'Busy'})', style: TextStyle(color: d.available ? AppTheme.textPrimary : AppTheme.critical)),
+                        )).toList(),
+                        onChanged: (v)=>pDoc=v
+                      );
+                    },
                   ),
                   const Gap(16),
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(labelText: 'Assign Bed'),
-                    items: (ref.read(realBedsProvider).asData?.value ?? []).where((b)=>b.status=='Available').map((b) => DropdownMenuItem(value: b.id, child: Text(b.id))).toList(),
+                    items: (ref.read(realBedsProvider).asData?.value ?? []).where((b)=>b.status=='Available' || b.id == pBed).map((b) => DropdownMenuItem(value: b.id, child: Text(b.id))).toList(),
                     onChanged: (v)=>pBed=v
                   ),
                   const Gap(16),
-                  DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(labelText: 'Assign Nurse'),
-                    items: (ref.read(realStaffProvider).asData?.value ?? []).where((s)=>s.role=='Nurse').map((n) => DropdownMenuItem(value: n.uid, child: Text(n.name))).toList(),
-                    onChanged: (v)=>pNurse=v
+                  Consumer(
+                    builder: (context, ref, child) {
+                      final staff = ref.watch(realStaffProvider).asData?.value ?? [];
+                      final staffKey = staff.fold<String>('', (prev, s) => '$prev${s.uid}${s.available}');
+                      
+                      return DropdownButtonFormField<String>(
+                        key: ValueKey('nurse_dropdown_$staffKey'),
+                        decoration: const InputDecoration(labelText: 'Assign Nurse'),
+                        items: staff.where((s)=>s.role=='Nurse').map((n) => DropdownMenuItem(
+                          value: n.uid, 
+                          child: Text('${n.name} (${n.available ? 'Available' : 'Busy'})', style: TextStyle(color: n.available ? AppTheme.textPrimary : AppTheme.critical)),
+                        )).toList(),
+                        onChanged: (v)=>pNurse=v
+                      );
+                    },
                   ),
                   const Gap(32),
                   SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () async {
+                    if (pPhone.length != 10) {
+                      setState(() => phoneError = 'Enter exactly 10 digits');
+                      return;
+                    }
                     if(pName.isNotEmpty && pCond.isNotEmpty){
                       // Title Case Formatting: Nisha
-                      String formattedName = pName.trim();
-                      if (formattedName.isNotEmpty) {
-                        formattedName = formattedName[0].toUpperCase() + formattedName.substring(1).toLowerCase();
-                      }
+                      String formattedName = pName.trim().split(' ').where((w) => w.isNotEmpty).map((word) {
+                        return word[0].toUpperCase() + word.substring(1).toLowerCase();
+                      }).join(' ');
 
                       final newPatient = PatientModel(
                         id: 'P-${DateTime.now().millisecondsSinceEpoch}',

@@ -66,7 +66,7 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
               const Gap(12),
               bedsAsync.when(
                 data: (beds) {
-                  final availableBeds = beds.where((b) => b.status == 'Available').toList();
+                  final availableBeds = beds.where((b) => b.status == 'Available' || b.id == selectedBedId).toList();
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     decoration: BoxDecoration(
@@ -118,7 +118,7 @@ class _TriageResultScreenState extends ConsumerState<TriageResultScreen> {
                               CircleAvatar(
                                 radius: 14,
                                 backgroundColor: AppTheme.primaryLight,
-                                child: Text(n.name.substring(0, 1), style: const TextStyle(fontSize: 12, color: AppTheme.primaryDark, fontWeight: FontWeight.bold)),
+                                child: Text(n.name.isNotEmpty ? n.name[0].toUpperCase() : '?', style: const TextStyle(fontSize: 12, color: AppTheme.primaryDark, fontWeight: FontWeight.bold)),
                               ),
                               const Gap(10),
                               Text(n.name),

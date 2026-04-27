@@ -147,9 +147,15 @@ class _TriageFormScreenState extends ConsumerState<TriageFormScreen> {
                 child: ElevatedButton(
                   onPressed: () {
                     final id = GoRouterState.of(context).uri.queryParameters['id'] ?? '';
-                    final nameArgs = nameController.text.isNotEmpty ? 'name=${Uri.encodeComponent(nameController.text)}&' : '';
+                    
+                    String toTitleCase(String text) => text.trim().split(' ').where((w) => w.isNotEmpty).map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase()).join(' ');
+                    
+                    final formattedName = toTitleCase(nameController.text);
+                    final formattedGender = toTitleCase(genderController.text);
+
+                    final nameArgs = formattedName.isNotEmpty ? 'name=${Uri.encodeComponent(formattedName)}&' : '';
                     final ageArgs = ageController.text.isNotEmpty ? 'age=${Uri.encodeComponent(ageController.text)}&' : '';
-                    final genderArgs = genderController.text.isNotEmpty ? 'gender=${Uri.encodeComponent(genderController.text)}&' : '';
+                    final genderArgs = formattedGender.isNotEmpty ? 'gender=${Uri.encodeComponent(formattedGender)}&' : '';
                     final idArg = id.isNotEmpty ? 'id=$id' : '';
                     context.push('/triage_result/$currentStatus?$nameArgs$ageArgs$genderArgs$idArg');
                   }, 

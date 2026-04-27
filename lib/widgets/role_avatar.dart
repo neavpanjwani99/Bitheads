@@ -17,8 +17,8 @@ class RoleAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String initials = name.isNotEmpty 
-        ? name.split(' ').map((e) => e[0]).take(2).join().toUpperCase() 
+    String initials = name.trim().isNotEmpty 
+        ? name.trim().split(' ').where((s) => s.isNotEmpty).map((e) => e[0]).take(2).join().toUpperCase() 
         : '?';
 
     Color bgColor = AppTheme.primary;

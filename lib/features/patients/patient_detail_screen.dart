@@ -306,7 +306,7 @@ Recent Activity: ${patient.events.isNotEmpty ? patient.events.last['description'
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Opacity(opacity: 0, child: Icon(Icons.timer)), // Spacer
-                        CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 32, child: Text(patient.name.substring(0,1), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.primaryDark))),
+                        CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 32, child: Text(patient.name.isNotEmpty ? patient.name[0].toUpperCase() : '?', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.primaryDark))),
                         if (patient.triageLevel == 'CRITICAL')
                           _buildGoldenHourTimer(patient.id)
                         else

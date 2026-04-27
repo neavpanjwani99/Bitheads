@@ -117,7 +117,7 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
                             children: [
                               Row(
                                 children: [
-                                  CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
+                                  CircleAvatar(backgroundColor: AppTheme.primaryLight, radius: 24, child: Text(updatedStaff.name.isNotEmpty ? updatedStaff.name[0].toUpperCase() : '?', style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold))),
                                   const Gap(16),
                                   Expanded(
                                     child: Column(
@@ -636,7 +636,7 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> w
                                 leading: CircleAvatar(
                                   radius: 24,
                                   backgroundColor: AppTheme.primaryLight.withValues(alpha: 0.5),
-                                  child: Text(p.name.substring(0,1), style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold)),
+                                  child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : '?', style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.bold)),
                                 ),
                                 title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                                 subtitle: Column(
