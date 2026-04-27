@@ -363,96 +363,24 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         double u = alerts.where((a)=>a.severity=='URGENT').length.toDouble();
         double s = alerts.where((a)=>a.severity=='STABLE').length.toDouble();
 
-        return StatefulBuilder(
-          builder: (context, setState) {
-            int touchedIndex = -1;
-
-            return Column(
-              children: [
-                Expanded(
-                  child: PieChart(PieChartData(
-                    pieTouchData: PieTouchData(
-                      touchCallback: (FlTouchEvent event, pieTouchResponse) {
-                        setState(() {
-                          if (!event.isInterestedForInteractions || pieTouchResponse == null || pieTouchResponse.touchedSection == null) {
-                            touchedIndex = -1;
-                            return;
-                          }
-                          touchedIndex = pieTouchResponse.touchedSection!.touchedSectionIndex;
-                        });
-                      },
-                    ),
-                    sectionsSpace: 4,
-                    centerSpaceRadius: 40,
-                    sections: [
-                      PieChartSectionData(
-                        value: c == 0 ? 0.5 : c, 
-                        color: AppTheme.critical, 
-                        title: c.toInt().toString(), 
-                        radius: touchedIndex == 0 ? 45 : 35, 
-                        titleStyle: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        badgeWidget: touchedIndex == 0 ? _buildPieTooltip('CRI', c.toInt()) : null,
-                        badgePositionPercentageOffset: 1.2,
-                      ),
-                      PieChartSectionData(
-                        value: u == 0 ? 0.5 : u, 
-                        color: AppTheme.urgent, 
-                        title: u.toInt().toString(), 
-                        radius: touchedIndex == 1 ? 45 : 35, 
-                        titleStyle: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        badgeWidget: touchedIndex == 1 ? _buildPieTooltip('URG', u.toInt()) : null,
-                        badgePositionPercentageOffset: 1.2,
-                      ),
-                      PieChartSectionData(
-                        value: s == 0 ? 0.5 : s, 
-                        color: AppTheme.stable, 
-                        title: s.toInt().toString(), 
-                        radius: touchedIndex == 2 ? 45 : 35, 
-                        titleStyle: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        badgeWidget: touchedIndex == 2 ? _buildPieTooltip('STB', s.toInt()) : null,
-                        badgePositionPercentageOffset: 1.2,
-                      ),
-                    ]
-                  )),
-                ),
-                const Gap(12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildLegendItem('Critical', AppTheme.critical),
-                    _buildLegendItem('Urgent', AppTheme.urgent),
-                    _buildLegendItem('Stable', AppTheme.stable),
-                  ]
-                )
-              ]
-            );
-          }
-        );
+        return BarChart(BarChartData(
+          alignment: BarChartAlignment.spaceEvenly,
+          maxY: alerts.isNotEmpty ? alerts.length.toDouble() : 10,
+          titlesData: FlTitlesData(
+            topTitles: const AxisTitles(), rightTitles: const AxisTitles(), leftTitles: const AxisTitles(),
+            bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v,m)=>Text(['CRI','URG','STB'][v.toInt()], style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary)))),
+          ),
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          barGroups: [
+            BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: c, color: AppTheme.critical, width: 16)]),
+            BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: u, color: AppTheme.urgent, width: 16)]),
+            BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: s, color: AppTheme.stable, width: 16)]),
+          ]
+        ));
       },
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => const Icon(Icons.error),
-    );
-  }
-
-  Widget _buildPieTooltip(String title, int value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black87,
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]
-      ),
-      child: Text('$title: $value', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-    );
-  }
-
-  Widget _buildLegendItem(String title, Color c) {
-    return Row(
-      children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-        const Gap(4),
-        Text(title, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
-      ],
     );
   }
 
