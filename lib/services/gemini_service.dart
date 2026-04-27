@@ -2,7 +2,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 class GeminiService {
-  static final List<String> _keys = [
+  static List<String> get _keys => [
     dotenv.env['GEMINI_API_KEY'] ?? '',
     dotenv.env['GEMINI_API_KEY_1'] ?? '',
     dotenv.env['GEMINI_API_KEY_2'] ?? '',
