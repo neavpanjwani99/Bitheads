@@ -50,6 +50,39 @@ RapidCare integrates a resilient Large Language Model (LLM) layer designed for c
    flutter pub get
 3. Execute the application: 
    flutter run
-   
+
+## Demo Credentials (For Testing Only)
+Note: These credentials are for demonstration purposes only and do not provide access to any real system.
+
+1. **Admin**
+- neavpanjwani99@gmail.com
+  Password: nev@1234
+
+- dhirajsuhanda@gmail.com
+   Password: dhi@1234
+
+- manyanirvan29@gmail.com
+   Password: man@1234
+
+2. **Doctor**
+- janesh@gmail.com
+   Password: jan@1234
+
+- sandhya@gmail.com
+   Password: san@1234
+
+- disha@gmail.com
+   Password: dis@1234
+
+3. **Nurse**
+- nurse1@gmail.com
+   Password: nur@1234
+
+- nurse2@gmail.com
+   Password: nur@1234
+
+- nurse3@gmail.com
+  Password: nur@1234
+
 Confidential Information. Authorized Personnel Only.
 Copyright 2026 Bitheads RapidCare.
